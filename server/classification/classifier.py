@@ -1,7 +1,7 @@
 """Configurable, deterministic mail intent classification extracted from the notebook."""
 from .config import load_config
 from .models import ClassificationConfig, ClassificationResult
-from .rules import CATEGORIES, text_for
+from .rules import CATEGORIES, has_bl_si_comparison, is_standalone_bl_request, lexical_scores, text_for
 
 class MailClassifier:
     def __init__(self, config: ClassificationConfig | None = None):
@@ -29,10 +29,18 @@ class MailClassifier:
             return ClassificationResult("GENERAL", 0.0, {c: 0.0 for c in CATEGORIES}, True, "empty_message")
         nlp, category_docs = self._load_spacy()
         document = nlp(text)
-        scores = {label: float(document.similarity(category_doc)) for label, category_doc in category_docs.items()}
-        category = max(scores, key=scores.get)
-        confidence = scores[category]
-        return ClassificationResult(category, confidence, scores, confidence < self.config.review_threshold, "low_spacy_similarity" if confidence < self.config.review_threshold else None, "spacy")
+        similarities = {label: float(document.similarity(category_doc)) for label, category_doc in category_docs.items()}
+        lexical = lexical_scores(text)
+        if not has_bl_si_comparison(text):
+            lexical["BL_COMPARISON"] = 0.0
+        combined = {label: similarities[label] + lexical[label] for label in CATEGORIES}
+        if not has_bl_si_comparison(text):
+            combined["BL_COMPARISON"] = -1e6
+        if is_standalone_bl_request(text):
+            combined["GENERAL"] = max(combined.values()) + 1.0
+        category = max(combined, key=combined.get)
+        confidence = similarities[category]
+        return ClassificationResult(category, confidence, similarities, confidence < self.config.review_threshold, "low_spacy_similarity" if confidence < self.config.review_threshold else None, "spacy")
 
     def classify_with_fallback(self, email: dict) -> ClassificationResult:
         try:
