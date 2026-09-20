@@ -276,6 +276,9 @@ function toSubmission(records: EmailRecord[]): Submission {
 }
 
 export const api = {
+  async runClassificationTest() {
+    return request<ClassificationTestResult>("/tests/classification", { method: "POST" });
+  },
   async listEmails() {
     const raw = await request<RawEmail[]>("/emails");
     const records = raw.map(summary);
@@ -353,4 +356,12 @@ export const api = {
       body: JSON.stringify(submission)
     });
   }
+};
+
+export type ClassificationTestResult = {
+  total: number; correct: number; accuracy: number; review_count: number;
+  confusion_matrix: Record<string, Record<string, number>>;
+  per_category: Record<string, { support: number; precision: number; recall: number; f1: number }>;
+  macro: { precision: number; recall: number; f1: number };
+  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; confidence: number; provider: string; check_required: boolean; review_reason?: string; correct: boolean }>;
 };

@@ -49,6 +49,7 @@ app = FastAPI(title="SDOC Hackathon Inbox", version="2.0",
               description="Serves the shipping-docs inbox and scores submissions. "
               "Ground truth is held privately and never served.")
 classifier = MailClassifier()
+TEST_CATEGORIES = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"]
 
 class Correction(BaseModel):
     corrected_values: dict = Field(default_factory=dict)
@@ -69,6 +70,31 @@ def classify_inbox():
         save_classification(email["email_id"], {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
         results.append({"email_id": email["email_id"], **result})
     return {"count": len(results), "results": results}
+
+@app.post("/tests/classification")
+def run_classification_test():
+    truth = _load_ground_truth()
+    results = []
+    matrix = {actual: {predicted: 0 for predicted in TEST_CATEGORIES} for actual in TEST_CATEGORIES}
+    for email in _load_inbox():
+        result = classifier.classify_with_fallback(email).to_dict()
+        actual = truth.get(email["email_id"], {}).get("category", "GENERAL")
+        predicted = result["category"] if result["category"] in TEST_CATEGORIES else "GENERAL"
+        matrix.setdefault(actual, {label: 0 for label in TEST_CATEGORIES})
+        matrix[actual].setdefault(predicted, 0)
+        matrix[actual][predicted] += 1
+        results.append({"email_id": email["email_id"], "subject": email.get("subject", ""), "actual": actual, "predicted": predicted, "confidence": result["confidence"], "provider": result["provider"], "check_required": result["check_required"], "review_reason": result.get("review_reason"), "correct": actual == predicted})
+    total = len(results)
+    per_category = {}
+    for label in TEST_CATEGORIES:
+        tp = matrix[label][label]
+        fp = sum(matrix[actual][label] for actual in TEST_CATEGORIES if actual != label)
+        fn = sum(matrix[label][predicted] for predicted in TEST_CATEGORIES if predicted != label)
+        precision = tp / (tp + fp) if tp + fp else 0
+        recall = tp / (tp + fn) if tp + fn else 0
+        per_category[label] = {"support": sum(matrix[label].values()), "precision": precision, "recall": recall, "f1": 2 * precision * recall / (precision + recall) if precision + recall else 0}
+    macro = {key: sum(item[key] for item in per_category.values()) / len(TEST_CATEGORIES) for key in ("precision", "recall", "f1")}
+    return {"total": total, "correct": sum(item["correct"] for item in results), "accuracy": sum(item["correct"] for item in results) / total if total else 0, "review_count": sum(item["check_required"] for item in results), "confusion_matrix": matrix, "per_category": per_category, "macro": macro, "results": results}
 
 @app.patch("/classifications/{email_id}")
 def correct_classification(email_id: str, correction: Correction):

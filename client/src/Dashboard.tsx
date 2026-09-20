@@ -35,9 +35,10 @@ import {
   type EmailRecord,
   type EmailStatus,
   type FieldResult
+  , type ClassificationTestResult
 } from "./api.ts";
 
-type View = "inbox" | "review" | "runs" | "export";
+type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
@@ -175,6 +176,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
               setMobileNav(false);
             }}
           />
+          <NavButton icon={<Activity size={16} />} label="Test" active={view === "test"} onClick={() => { setView("test"); setSelected(null); setMobileNav(false); }} />
           <NavButton
             icon={<BarChart3 size={16} />}
             label="Export"
@@ -265,6 +267,8 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
                   ? "Review queue"
                   : view === "runs"
                     ? "Run status"
+                    : view === "test"
+                      ? "Test"
                     : "Export"}
             </strong>
           </div>
@@ -348,6 +352,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
         {!loading && !loadError && view === "runs" && (
           <RunsView emails={emails} onNotify={notify} />
         )}
+        {!loading && !loadError && view === "test" && <TestView onNotify={notify} />}
         {!loading && !loadError && view === "export" && (
           <ExportView emails={emails} onNotify={notify} />
         )}
@@ -1101,6 +1106,23 @@ function ReviewView({
       </div>
     </section>
   );
+}
+
+function TestView({ onNotify }: { onNotify: (message: string) => void }) {
+  const [run, setRun] = useState<ClassificationTestResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [selected, setSelected] = useState<ClassificationTestResult["results"][number] | null>(null);
+  const execute = async () => { setRunning(true); try { setRun(await api.runClassificationTest()); onNotify("Classification test completed"); } catch (error) { onNotify(error instanceof Error ? error.message : "Test failed"); } finally { setRunning(false); } };
+  const labels = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"];
+  return <section className="page-wrap">
+    <div className="page-heading"><div><h1>Pipeline test</h1><p>Re-run classification across all 520 emails against the private ground truth.</p></div><button className="button button-primary" onClick={execute} disabled={running}><RefreshCw size={15} /> {running ? "Running 520 emails..." : "Run classification test"}</button></div>
+    {!run ? <div className="empty-state"><Activity size={24} /><strong>No test run yet</strong><span>Run the complete classification pipeline to inspect accuracy and errors.</span></div> : <>
+      <div className="stats-strip"><div className="stat"><span>Accuracy</span><strong>{(run.accuracy * 100).toFixed(1)}%</strong><small>{run.correct} / {run.total} correct</small></div><div className="stat"><span>Macro precision</span><strong>{(run.macro.precision * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro sensitivity</span><strong>{(run.macro.recall * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro F1</span><strong>{(run.macro.f1 * 100).toFixed(1)}%</strong></div><div className="stat"><span>Review escalations</span><strong>{run.review_count}</strong></div></div>
+      <div className="test-grid"><div><div className="panel-heading"><div><span className="eyebrow">CONFUSION MATRIX</span><h2>Actual versus predicted</h2></div></div><div className="matrix-wrap"><table className="test-matrix"><thead><tr><th>Actual \ Predicted</th>{labels.map(label => <th key={label}>{label.replace("_", " ")}</th>)}</tr></thead><tbody>{labels.map(actual => <tr key={actual}><th>{actual.replace("_", " ")}</th>{labels.map(predicted => <td className={actual === predicted ? "matrix-correct" : ""} key={predicted}>{run.confusion_matrix[actual]?.[predicted] ?? 0}</td>)}</tr>)}</tbody></table></div></div><div className="score-panel"><span className="eyebrow">PER-CATEGORY QUALITY</span>{labels.map(label => <div className="test-metric" key={label}><strong>{label.replace("_", " ")}</strong><span>P {(run.per_category[label].precision * 100).toFixed(1)}% · R {(run.per_category[label].recall * 100).toFixed(1)}% · F1 {(run.per_category[label].f1 * 100).toFixed(1)}%</span><small>{run.per_category[label].support} actual records</small></div>)}</div></div>
+      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Ground truth versus classifier</h2></div></div>{run.results.filter(item => !item.correct).slice(0, 100).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{(item.confidence * 100).toFixed(1)}%</span><ChevronRight size={15} /></button>)}{run.results.every(item => item.correct) && <div className="empty-state"><CheckCircle2 size={22} /><strong>No misclassifications</strong></div>}</div>
+      {selected && <div className="test-detail"><button className="icon-button" onClick={() => setSelected(null)}><X size={16} /></button><span className="eyebrow">TEST DETAIL</span><h2>{selected.email_id}</h2><p>{selected.subject}</p><div className="test-detail-values"><span>Ground truth<strong>{selected.actual}</strong></span><span>Predicted<strong>{selected.predicted}</strong></span><span>Score<strong>{(selected.confidence * 100).toFixed(1)}%</strong></span><span>Path<strong>{selected.provider === "spacy" ? "NLP comparison" : "LLM fallback"}</strong></span></div>{selected.review_reason && <p className="reason-copy">{selected.review_reason}</p>}</div>}
+    </>}
+  </section>;
 }
 
 function RunsView({
