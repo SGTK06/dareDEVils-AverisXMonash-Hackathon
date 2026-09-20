@@ -875,6 +875,9 @@ tbody tr:focus {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.review-input { width: 100%; min-width: 0; border: 1px solid var(--amber); background: var(--bg); padding: 5px 6px; border-radius: 4px; font: 11px var(--mono); }
+.review-save-bar { margin-top: 18px; padding: 12px; display: flex; justify-content: space-between; align-items: center; gap: 14px; background: var(--amber-bg); color: var(--amber); font-size: 11px; }
+.review-save-bar span { display: flex; align-items: center; gap: 7px; }
 .confidence-dot {
   width: 6px;
   height: 6px;

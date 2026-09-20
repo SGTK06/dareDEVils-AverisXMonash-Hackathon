@@ -20,7 +20,6 @@ import {
   Moon,
   MoreHorizontal,
   PanelRight,
-  Play,
   RefreshCw,
   Search,
   Send,
@@ -693,6 +692,8 @@ function DetailView({
   const [reclassify, setReclassify] = useState(false);
   const meta = statusMeta[email.status];
   const fields = email.fields ?? [];
+  const [edited, setEdited] = useState<Record<string, string>>({});
+  const reviewRequired = email.status === "Needs review" || email.checkRequired;
   return (
     <section className="detail-layout">
       <div className="detail-header">
@@ -736,7 +737,7 @@ function DetailView({
               </span>
             </div>
             {reclassify && (
-              <select className="select-full">
+              <select className="select-full" defaultValue={email.category}>
                 <option>{email.category}</option>
                 <option>Comparison request</option>
                 <option>General</option>
@@ -857,11 +858,11 @@ function DetailView({
                 >
                   <strong>{field.field}</strong>
                   <span className="value-cell">
-                    <code>{field.si}</code>
+                  {reviewRequired ? <input className="review-input" aria-label={`${field.field} SI value`} defaultValue={field.si} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_si`]: e.target.value }))} /> : <code>{field.si}</code>}
                     <Confidence value={field.confidence} />
                   </span>
                   <span className="value-cell">
-                    <code>{field.bl}</code>
+                    {reviewRequired ? <input className="review-input" aria-label={`${field.field} BL value`} defaultValue={field.bl} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_bl`]: e.target.value }))} /> : <code>{field.bl}</code>}
                     <Confidence value={field.confidence} />
                   </span>
                   <span>
@@ -896,6 +897,12 @@ function DetailView({
               the evidence icon to inspect the source snippet.
             </span>
           </div>
+          {reviewRequired && (
+            <div className="review-save-bar">
+              <span><AlertTriangle size={15} /> Check required · edit values, then resolve this case.</span>
+              <button className="button button-primary" onClick={async () => { await api.correct(email.id, edited); onNotify("Correction saved and review resolved"); }}>Save correction</button>
+            </div>
+          )}
         </div>
       </div>
       {evidence && (

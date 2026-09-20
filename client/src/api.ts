@@ -42,6 +42,7 @@ export type EmailRecord = {
   reason?: string;
   fields?: FieldResult[];
   raw?: RawEmail;
+  checkRequired?: boolean;
 };
 
 type Submission = Record<
@@ -306,8 +307,21 @@ export const api = {
   async getEmail(id: string) {
     const raw = await request<RawEmail>(`/emails/${encodeURIComponent(id)}`);
     const record = await processEmail(raw, cache.get(id));
+    try {
+      const classification = await request<{ check_required: boolean; category: string; confidence: number }>(`/classifications/${encodeURIComponent(id)}`);
+      record.category = classification.category === "BL_COMPARISON" ? "Comparison request" : classification.category === "SI_REQUEST" ? "New SI request" : classification.category === "INVOICE_QUERY" ? "Invoice query" : classification.category === "SPAM" ? "Spam" : "General";
+      record.categoryConfidence = classification.confidence;
+      record.checkRequired = classification.check_required;
+      if (classification.check_required && record.status === "Classified") record.status = "Needs review";
+    } catch { /* classification service is optional during local development */ }
     cache.set(id, record);
     return record;
+  },
+  async correct(id: string, correctedValues: Record<string, string>, category?: string) {
+    await request(`/classifications/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ corrected_values: correctedValues, category }) });
+    const current = cache.get(id);
+    if (current) { const updated = { ...current, status: "Classified" as EmailStatus, result: "Review resolved", checkRequired: false }; cache.set(id, updated); return updated; }
+    return this.getEmail(id);
   },
   async retry(id: string) {
     return this.getEmail(id);
