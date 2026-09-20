@@ -104,7 +104,7 @@ CANONICAL_LABEL_ALIASES = {
 
 
 def levenshtein_distance(a: str, b: str) -> int:
-    """Return the dynamic-programming Levenshtein edit distance."""
+    """Return the minimum number of single-character edits needed to convert ``a`` to ``b``."""
     if a == b:
         return 0
     if not a:
@@ -112,6 +112,7 @@ def levenshtein_distance(a: str, b: str) -> int:
     if not b:
         return len(a)
 
+    # Keep the shorter string as the DP row to reduce memory usage.
     if len(a) < len(b):
         a, b = b, a
 
@@ -128,10 +129,12 @@ def levenshtein_distance(a: str, b: str) -> int:
 
 
 def _normalise_label(label: str) -> str:
+    """Uppercase a document label and collapse punctuation into spaces."""
     return re.sub(r"[^A-Z0-9]+", " ", str(label).upper()).strip()
 
 
 def _canonical_field_name(raw_label: str) -> Optional[str]:
+    """Map a raw document label to its canonical comparison-field name."""
     label = _normalise_label(raw_label)
     for field, aliases in CANONICAL_LABEL_ALIASES.items():
         if label in aliases:
@@ -140,6 +143,7 @@ def _canonical_field_name(raw_label: str) -> Optional[str]:
 
 
 def _normalise_name(value: Optional[str]) -> str:
+    """Normalize a name for comparison, including removal of legal-form words."""
     if value is None:
         return ""
     text = str(value).strip()
@@ -148,6 +152,7 @@ def _normalise_name(value: Optional[str]) -> str:
     text = re.sub(r"\(([A-Z0-9]+)\)", r" \1 ", text.upper())
     text = re.sub(r"[^A-Z0-9]+", " ", text)
     tokens = []
+    # Legal suffixes do not identify the underlying business and are ignored.
     for token in text.split():
         token = token.strip("()")
         if not token:
@@ -159,6 +164,7 @@ def _normalise_name(value: Optional[str]) -> str:
 
 
 def _same_words_in_any_order(a: str, b: str) -> bool:
+    """Return whether two values contain the same normalized words in any order."""
     a_words = _normalise_name(a).split()
     b_words = _normalise_name(b).split()
     if not a_words or not b_words:
@@ -167,6 +173,7 @@ def _same_words_in_any_order(a: str, b: str) -> bool:
 
 
 def _extract_locode(value: Optional[str]) -> Optional[str]:
+    """Extract a five-letter UN/LOCODE from a parenthesized value, if present."""
     if value is None:
         return None
     match = re.search(r"\(([A-Z]{5})\)", str(value).upper())
@@ -176,6 +183,7 @@ def _extract_locode(value: Optional[str]) -> Optional[str]:
 
 
 def _extract_number(value: Optional[str]) -> Optional[float]:
+    """Extract the first integer or decimal number from a field value."""
     if value is None:
         return None
     text = str(value)
@@ -187,6 +195,7 @@ def _extract_number(value: Optional[str]) -> Optional[float]:
 
 
 def _port_city_name(value: Optional[str]) -> str:
+    """Reduce a port value to a normalized city name for fallback comparison."""
     if value is None:
         return ""
     text = str(value).upper()
@@ -211,6 +220,7 @@ def _port_city_name(value: Optional[str]) -> str:
 
 
 def _compare_text_value(a: str, b: str) -> Tuple[str, float, int, str]:
+    """Compare two text values and return verdict, similarity, distance, and explanation."""
     if not a or not b:
         return ("REVIEW", 0.0, 0, "A required value is missing; escalation is required.")
 
@@ -247,7 +257,7 @@ def _compare_text_value(a: str, b: str) -> Tuple[str, float, int, str]:
 
 
 def compare_field(field_name: str, si_value: Optional[str], bl_value: Optional[str]) -> Dict[str, object]:
-    """Compare a single field using the required rules and return a verdict dict."""
+    """Compare one SI/BL field using text, port, or numeric matching rules."""
     if si_value is None or bl_value is None:
         return {
             "field": field_name,
@@ -272,22 +282,24 @@ def compare_field(field_name: str, si_value: Optional[str], bl_value: Optional[s
         si_locode = _extract_locode(si_text)
         bl_locode = _extract_locode(bl_text)
         if si_locode and bl_locode:
-            left = si_locode
-            right = bl_locode
-            if left == right:
+            left_city = _port_city_name(si_text)
+            right_city = _port_city_name(bl_text)
+            left = _normalise_name(left_city)
+            right = _normalise_name(right_city)
+            if si_locode == bl_locode and left == right:
                 return {
                     "field": field_name,
                     "verdict": "MATCH",
                     "similarity": 1.0,
                     "distance": 0,
-                    "note": "Both ports share the same UN/LOCODE.",
+                    "note": "UN/LOCODE and normalized port city both match.",
                 }
             return {
                 "field": field_name,
                 "verdict": "MISMATCH",
                 "similarity": 0.0,
                 "distance": levenshtein_distance(left, right),
-                "note": "LOCODEs differ and the port values do not match.",
+                "note": "Port city or UN/LOCODE differs.",
             }
 
         left = _port_city_name(si_text)
@@ -341,7 +353,7 @@ def compare_field(field_name: str, si_value: Optional[str], bl_value: Optional[s
 
 
 def extract_fields(document_text: Optional[str]) -> Dict[str, str]:
-    """Extract the five comparison fields from a plain-text document.
+    """Extract recognized comparison fields from a plain-text document.
 
     Expected format: LABEL: value
     """
@@ -364,7 +376,7 @@ def extract_fields(document_text: Optional[str]) -> Dict[str, str]:
 
 
 def compare_document_pair(si_document: Optional[str], bl_document: Optional[str]) -> Dict[str, Dict[str, object]]:
-    """Compare the SI text with the BL text and return the field-by-field verdicts."""
+    """Compare SI and BL text and return verdicts for every field in ``FIELD_ORDER``."""
     si_fields = extract_fields(si_document)
     bl_fields = extract_fields(bl_document)
     results: Dict[str, Dict[str, object]] = {}
@@ -374,7 +386,7 @@ def compare_document_pair(si_document: Optional[str], bl_document: Optional[str]
 
 
 def report_document_pair(si_document: Optional[str], bl_document: Optional[str]) -> Dict[str, Dict[str, object]]:
-    """Print a compact comparison report and return the field results."""
+    """Print a compact SI/BL comparison report and return the field results."""
     si_fields = extract_fields(si_document)
     bl_fields = extract_fields(bl_document)
     results = compare_document_pair(si_document, bl_document)
@@ -395,20 +407,20 @@ def report_document_pair(si_document: Optional[str], bl_document: Optional[str])
 
 
 def read_text_file(path: str | Path) -> str:
-    """Read a text file using UTF-8 with fallback to replacement for real dataset files."""
+    """Read a file as UTF-8 while ignoring undecodable bytes in dataset files."""
     file_path = Path(path)
     return file_path.read_text(encoding="utf-8", errors="ignore")
 
 
 def compare_file_pair(si_path: str | Path, bl_path: str | Path) -> Dict[str, Dict[str, object]]:
-    """Compare two real attachment files (for example, SI and BL .txt files)."""
+    """Read and compare two attachment files, such as an SI and BL text file."""
     si_document = read_text_file(si_path)
     bl_document = read_text_file(bl_path)
     return compare_document_pair(si_document, bl_document)
 
 
 def find_attachment_pair_for_email(email_id: str, dataset_dir: str | Path = "data_v2") -> Tuple[Path, Path]:
-    """Return the SI and BL file paths for an email in the real dataset."""
+    """Locate and return the SI and BL attachment paths for an email record."""
     root = Path(dataset_dir)
     inbox_dir = root / "inbox"
     email_file = inbox_dir / f"{email_id}.json"
@@ -429,6 +441,8 @@ def find_attachment_pair_for_email(email_id: str, dataset_dir: str | Path = "dat
         if not candidate.is_absolute():
             candidate = root / candidate
         if not candidate.exists():
+            # Dataset metadata may contain only a filename, while files live in
+            # the dataset's shared attachments directory.
             fallback = root / "attachments" / candidate.name
             if fallback.exists():
                 candidate = fallback
@@ -447,7 +461,7 @@ def find_attachment_pair_for_email(email_id: str, dataset_dir: str | Path = "dat
 
 
 def compare_email_dataset(email_id: str, dataset_dir: str | Path = "data_v2") -> Dict[str, Dict[str, object]]:
-    """Compare the SI and BL files for a real email record in the dataset."""
+    """Find, read, and compare the SI and BL attachments for an email record."""
     si_path, bl_path = find_attachment_pair_for_email(email_id, dataset_dir)
     return compare_file_pair(si_path, bl_path)
 
@@ -468,6 +482,7 @@ __all__ = [
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser for the comparison utility."""
     parser = argparse.ArgumentParser(description="Compare SI/BL proper-noun strings with regex + Levenshtein distance.")
     parser.add_argument("si_path", nargs="?", help="Path to the SI document or a literal email id like email_001.")
     parser.add_argument("bl_path", nargs="?", help="Path to the BL document. Optional when using --email-id.")
@@ -477,6 +492,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """Run the command-line comparison workflow selected by the provided arguments."""
     parser = _build_parser()
     args = parser.parse_args()
 
