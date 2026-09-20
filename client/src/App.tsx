@@ -1,8 +1,9 @@
-import { useAuth } from './hooks/useAuth'
-import { AuthPage } from './components/AuthPage'
+import { useAuth } from "./hooks/useAuth";
+import { AuthPage } from "./components/AuthPage";
+import Dashboard from "./Dashboard.tsx";
 
 function App() {
-  const { user, loading, signOut } = useAuth()
+  const { user, loading, signOut } = useAuth();
 
   if (loading) {
     return (
@@ -28,31 +29,14 @@ function App() {
           />
         </svg>
       </main>
-    )
+    );
   }
 
   if (!user) {
-    return <AuthPage />
+    return <AuthPage />;
   }
 
-  return (
-    <main className="min-h-screen bg-black flex flex-col items-center justify-center gap-6 px-4">
-      <div className="text-center">
-        <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-white">
-          Welcome back
-        </h1>
-        <p className="mt-2 text-[14px] text-neutral-400">
-          {user.email}
-        </p>
-      </div>
-      <button
-        onClick={signOut}
-        className="rounded-lg border border-neutral-800 bg-transparent px-5 py-2 text-[14px] font-medium text-white transition-colors hover:border-neutral-600 hover:bg-neutral-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
-      >
-        Sign out
-      </button>
-    </main>
-  )
+  return <Dashboard userEmail={user.email ?? ""} onSignOut={signOut} />;
 }
 
-export default App
+export default App;
