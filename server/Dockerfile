@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \
     -r requirements.txt
+RUN python -m spacy download en_core_web_md
 
 # app code (data + ground truth come in as mounts, not baked into the image)
 COPY scoring.py app.py score_cli.py persistence.py ./

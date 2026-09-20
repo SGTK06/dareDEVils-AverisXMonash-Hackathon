@@ -5,6 +5,7 @@ from typing import Any
 class ClassificationConfig:
     review_threshold: float = 0.80
     temperature: float = 0.15
+    spacy_model: str = "en_core_web_md"
 
 @dataclass
 class ClassificationResult:

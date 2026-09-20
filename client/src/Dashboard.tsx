@@ -733,7 +733,7 @@ function DetailView({
             <div className="classification">
               <span className="category-badge">{email.category}</span>
               <span className="confidence">
-                {Math.round(email.categoryConfidence * 100)}% confidence
+                {email.categoryConfidence.toFixed(3)} raw score · {email.classificationProvider ?? "pipeline"}
               </span>
             </div>
             {reclassify && (
@@ -761,7 +761,7 @@ function DetailView({
                   <FileText size={16} />
                   <div>
                     <strong>{file}</strong>
-                    <span>Text document · 12 KB</span>
+                  <span>Attachment available from inbox</span>
                   </div>
                   <button className="icon-button" aria-label={`View ${file}`}>
                     <PanelRight size={15} />
@@ -774,20 +774,20 @@ function DetailView({
           </div>
           <div className="context-section timeline-section">
             <div className="section-label">Pipeline timeline</div>
-            <TimelineStep label="Ingested" time="09:42:04" state="done" />
+            <TimelineStep label="Ingested" time="Completed" state="done" />
             <TimelineStep
               label="Classified"
-              time="09:42:05 · 0.8s"
+              time="Completed from API"
               state="done"
             />
             <TimelineStep
               label="Extracted"
-              time="09:42:08 · 2.7s"
+              time="Completed on demand"
               state={email.status === "Failed" ? "failed" : "done"}
             />
             <TimelineStep
               label="Compared"
-              time={email.status === "Failed" ? "Waiting" : "09:42:09 · 0.9s"}
+              time={email.status === "Failed" ? "Waiting" : "Completed on demand"}
               state={email.status === "Failed" ? "waiting" : "done"}
             />
             <TimelineStep
@@ -801,7 +801,7 @@ function DetailView({
             />
             {email.status === "Failed" && (
               <div className="timeline-error">
-                <strong>OCR service timed out</strong>
+                <strong>{email.reason ?? "Processing failed"}</strong>
                 <span>Try the step again to continue.</span>
                 <button
                   className="button button-small"
@@ -1049,7 +1049,7 @@ function ReviewView({
         <div>
           <span className="status status-review">
             <span className="status-dot" />
-            Oldest case · 42m
+            Review cases are ordered by the inbox source
           </span>
         </div>
       </div>
@@ -1078,7 +1078,7 @@ function ReviewView({
             <div className="review-fields">
               <span>Affected</span>
               <b>
-                {email.id === "email_009" ? "Attachment missing" : "Consignee"}
+                {email.missingAttachment ? "Attachment missing" : email.fields?.filter((field) => field.result === "review" || field.result === "mismatch").map((field) => field.field).join(", ") || "Classification confidence"}
               </b>
             </div>
             <ChevronRight size={17} />

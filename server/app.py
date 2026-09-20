@@ -57,7 +57,7 @@ class Correction(BaseModel):
 @app.get("/classifications/{email_id}")
 def classify_email(email_id: str):
     email = get_email(email_id)
-    result = classifier.classify(email).to_dict()
+    result = classifier.classify_with_fallback(email).to_dict()
     save_classification(email_id, {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
     return {"email_id": email_id, **result}
 
@@ -65,7 +65,7 @@ def classify_email(email_id: str):
 def classify_inbox():
     results = []
     for email in _load_inbox():
-        result = classifier.classify(email).to_dict()
+        result = classifier.classify_with_fallback(email).to_dict()
         save_classification(email["email_id"], {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
         results.append({"email_id": email["email_id"], **result})
     return {"count": len(results), "results": results}
