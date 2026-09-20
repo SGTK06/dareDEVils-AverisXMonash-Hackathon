@@ -694,6 +694,13 @@ function DetailView({
   const fields = email.fields ?? [];
   const [edited, setEdited] = useState<Record<string, string>>({});
   const reviewRequired = email.status === "Needs review" || email.checkRequired;
+  const processingLabel = email.classificationProvider === "gemini"
+    ? "LLM fallback"
+    : email.classificationProvider === "spacy"
+      ? "NLP comparison"
+      : email.classificationProvider === "primary+gemini_failed"
+        ? "NLP comparison · LLM fallback"
+        : "Classification pipeline";
   return (
     <section className="detail-layout">
       <div className="detail-header">
@@ -733,7 +740,7 @@ function DetailView({
             <div className="classification">
               <span className="category-badge">{email.category}</span>
               <span className="confidence">
-                {email.categoryConfidence.toFixed(3)} raw score · {email.classificationProvider ?? "pipeline"}
+                {(email.categoryConfidence * 100).toFixed(1)}% · {processingLabel}
               </span>
             </div>
             {reclassify && (
@@ -1263,7 +1270,7 @@ function ExportView({
             <>
               <div className="score-result">
                 <strong>
-                  {score === null ? "—" : (score * 100).toFixed(1)}
+                  {score === null ? "—" : `${(score * 100).toFixed(1)}%`}
                 </strong>
                 <span>/ 100</span>
               </div>
