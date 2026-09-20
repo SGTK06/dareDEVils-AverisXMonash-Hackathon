@@ -1165,6 +1165,7 @@ tbody tr:focus {
 .test-metric strong { font-size: 11px; font-weight: 500; }
 .test-metric span, .test-metric small { color: var(--muted); font-size: 10px; }
 .test-result-row { width: 100%; display: grid; grid-template-columns: 1.5fr 1fr 1fr .6fr 18px; gap: 15px; align-items: center; padding: 13px 16px; border: 0; border-bottom: 1px solid var(--border); background: transparent; text-align: left; font-size: 10px; }
+.test-result-head { display: grid; grid-template-columns: 1.5fr 1fr 1fr .6fr 18px; gap: 15px; padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--muted-2); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
 .test-result-row:hover { background: var(--surface); }
 .test-result-row span:first-child { display: grid; gap: 4px; min-width: 0; }
 .test-result-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
