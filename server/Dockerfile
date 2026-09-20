@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir \
     -r requirements.txt
 
 # app code (data + ground truth come in as mounts, not baked into the image)
-COPY scoring.py app.py score_cli.py ./
+COPY scoring.py app.py score_cli.py persistence.py ./
+COPY classification ./classification
 
 EXPOSE 8000
 

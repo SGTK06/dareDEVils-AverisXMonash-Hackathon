@@ -31,6 +31,9 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
+from classification import MailClassifier
+from persistence import save_classification
 
 import scoring
 
@@ -44,7 +47,37 @@ JUDGE_TOKEN = os.environ.get("JUDGE_TOKEN")
 
 app = FastAPI(title="SDOC Hackathon Inbox", version="2.0",
               description="Serves the shipping-docs inbox and scores submissions. "
-                          "Ground truth is held privately and never served.")
+              "Ground truth is held privately and never served.")
+classifier = MailClassifier()
+
+class Correction(BaseModel):
+    corrected_values: dict = Field(default_factory=dict)
+    category: str | None = None
+
+@app.get("/classifications/{email_id}")
+def classify_email(email_id: str):
+    email = get_email(email_id)
+    result = classifier.classify(email).to_dict()
+    save_classification(email_id, {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
+    return {"email_id": email_id, **result}
+
+@app.post("/classifications/run")
+def classify_inbox():
+    results = []
+    for email in _load_inbox():
+        result = classifier.classify(email).to_dict()
+        save_classification(email["email_id"], {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
+        results.append({"email_id": email["email_id"], **result})
+    return {"count": len(results), "results": results}
+
+@app.patch("/classifications/{email_id}")
+def correct_classification(email_id: str, correction: Correction):
+    get_email(email_id)
+    payload = {"status": "RESOLVED", "check_required": False, "review_reason": None, "corrected_values": correction.corrected_values}
+    if correction.category:
+        payload["category"] = correction.category
+    save_classification(email_id, payload)
+    return {"email_id": email_id, **payload}
 
 
 # --------------------------------------------------------------------------

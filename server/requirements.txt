@@ -3,3 +3,4 @@ uvicorn[standard]>=0.27,<1.0
 llama-cloud
 google-genai
 llama-cloud-services
+httpx>=0.27,<1.0
