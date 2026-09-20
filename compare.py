@@ -282,22 +282,24 @@ def compare_field(field_name: str, si_value: Optional[str], bl_value: Optional[s
         si_locode = _extract_locode(si_text)
         bl_locode = _extract_locode(bl_text)
         if si_locode and bl_locode:
-            left = si_locode
-            right = bl_locode
-            if left == right:
+            left_city = _port_city_name(si_text)
+            right_city = _port_city_name(bl_text)
+            left = _normalise_name(left_city)
+            right = _normalise_name(right_city)
+            if si_locode == bl_locode and left == right:
                 return {
                     "field": field_name,
                     "verdict": "MATCH",
                     "similarity": 1.0,
                     "distance": 0,
-                    "note": "Both ports share the same UN/LOCODE.",
+                    "note": "UN/LOCODE and normalized port city both match.",
                 }
             return {
                 "field": field_name,
                 "verdict": "MISMATCH",
                 "similarity": 0.0,
                 "distance": levenshtein_distance(left, right),
-                "note": "LOCODEs differ and the port values do not match.",
+                "note": "Port city or UN/LOCODE differs.",
             }
 
         left = _port_city_name(si_text)
