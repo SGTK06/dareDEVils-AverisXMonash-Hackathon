@@ -1,0 +1,28 @@
+{
+  "name": "daredevils-averisxmonash-hackathon",
+  "version": "1.0.0",
+  "description": "Team dareDEVils Repo for Averis X Monash Hackathon",
+  "main": "index.js",
+  "scripts": {
+    "dev:api": "cross-env DATA_DIR=data_v2 GROUND_TRUTH=data_v2/ground_truth.json python -m uvicorn app:app --app-dir server --host 127.0.0.1 --port 8080",
+    "dev:web": "npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173",
+    "dev:full": "node scripts/dev-full.cjs",
+    "build:web": "npm --prefix frontend run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "cross-env": "latest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SGTK06/dareDEVils-AverisXMonash-Hackathon.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SGTK06/dareDEVils-AverisXMonash-Hackathon/issues"
+  },
+  "homepage": "https://github.com/SGTK06/dareDEVils-AverisXMonash-Hackathon#readme"
+}
