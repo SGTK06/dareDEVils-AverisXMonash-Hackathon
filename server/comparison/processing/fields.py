@@ -1,3 +1,5 @@
+import re
+
 from ..processing_steps.normalization import normalize_text, levenshtein_similarity
 from ..processing_steps.numbers import parse_number
 from ..processing_steps.ports import parse_port
@@ -10,7 +12,14 @@ def result(field: str, verdict: str, similarity: float, note: str, **extra):
 def process_entity_field(field: str, left: str, right: str):
     if not left or not right:
         return result(field, "REVIEW", 0, "missing value")
-    a, b = normalize_text(left), normalize_text(right)
+    def identity(value: str) -> str:
+        value = re.split(
+            r"\||\bON BEHALF OF\b|;|\s+#?\d|\s+(?:[A-Z0-9-]+\s+)?(?:BLDG|BUILDING|ROAD|STREET|AVENUE|PLACE|DRIVE)\b",
+            str(value), maxsplit=1, flags=re.IGNORECASE,
+        )[0]
+        return normalize_text(value)
+
+    a, b = identity(left), identity(right)
     if a == b or sorted(a.split()) == sorted(b.split()):
         return result(field, "MATCH", 1, "normalized entity match")
     similarity = levenshtein_similarity(a, b)
@@ -24,7 +33,9 @@ def process_port_field(field: str, left: str, right: str):
     left_code, left_name = parse_port(left)
     right_code, right_name = parse_port(right)
     if left_code and right_code:
-        same = left_code == right_code
+        # A corrupted/rendered document can retain a LOCODE while displaying
+        # a different city. Both identifiers must agree.
+        same = left_code == right_code and normalize_text(left_name) == normalize_text(right_name)
         return result(field, "MATCH" if same else "MISMATCH", 1 if same else 0, "same UN/LOCODE" if same else "UN/LOCODE differs")
     return process_entity_field(field, left_name, right_name)
 

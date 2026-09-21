@@ -165,10 +165,12 @@ def run_comparison_test():
         prediction = compare_email(email_id, DATA_DIR)
         actual_status = gold.get("status", "OK")
         predicted_status = prediction.get("status", "NEEDS_REVIEW")
-        matrix[actual_status][predicted_status] += 1
+        has_pair = len(get_email(email_id).get("attachments") or []) >= 2
+        if has_pair:
+            matrix[actual_status][predicted_status] += 1
         gold_fields = set(gold.get("defect_fields", []))
         predicted_fields = set(prediction.get("defect_fields", []))
-        comparable = actual_status in {"OK", "MISMATCH"}
+        comparable = has_pair and actual_status in {"OK", "MISMATCH"}
         if comparable:
             for field in field_labels:
                 gold_bad, predicted_bad = field in gold_fields, field in predicted_fields
@@ -189,6 +191,7 @@ def run_comparison_test():
             "actual_fields": sorted(gold_fields),
             "predicted_fields": sorted(predicted_fields),
             "review_reason": prediction.get("review_reason"),
+            "has_attachment_pair": has_pair,
             "correct": actual_status == predicted_status and gold_fields == predicted_fields,
         })
 
@@ -208,7 +211,7 @@ def run_comparison_test():
         has_pair = len(email.get("attachments") or []) >= 2
         if has_pair:
             pair_count += 1
-        if item.get("status") != "NEEDS_REVIEW":
+        if has_pair and item.get("status") != "NEEDS_REVIEW":
             comparable_count += 1
             if has_pair:
                 prediction = next((row for row in results if row["email_id"] == eid), None)
@@ -220,14 +223,15 @@ def run_comparison_test():
     review_precision = review_caught / predicted_review if predicted_review else 0
     review_recall = review_caught / review_total if review_total else 0
     return {
-        "total": len(results), "comparable_total": comparable_count, "pair_total": pair_count, "review_total": review_total,
+        "total": len(results), "comparable_total": comparable_count, "pair_total": pair_count,
+        "not_comparable_total": len(results) - pair_count, "review_total": review_total,
         "status_confusion_matrix": matrix,
         "field_metrics": {field: prf(stats) for field, stats in field_stats.items()},
         "macro_field": {key: sum(metrics[key] for metrics in {field: prf(stats) for field, stats in field_stats.items()}.values()) / len(field_labels) for key in ("precision", "recall", "f1", "exact_accuracy")},
         "exact_defect_field_accuracy": sum(
             set(item["actual_fields"]) == set(item["predicted_fields"])
             for item in results
-            if truth[item["email_id"]].get("status") != "NEEDS_REVIEW"
+            if item.get("has_attachment_pair") and truth[item["email_id"]].get("status") != "NEEDS_REVIEW"
         ) / comparable_count if comparable_count else 0,
         "pair_exact_defect_field_accuracy": pair_exact / pair_count if pair_count else 0,
         "review_precision": review_precision, "review_recall": review_recall,

@@ -5,6 +5,7 @@ PORT_NOISE = {"PORT", "HARBOUR", "HARBOR", "TERMINAL", "CONTAINER", "INTERNATION
 
 def parse_port(value: str) -> tuple[str | None, str]:
     text = str(value or "").upper()
+    text = re.split(r"\b(?:OCEAN VESSEL|EXPORT CARRIER|CONTAINER NO\.?|DESCRIPTION)\b", text, maxsplit=1)[0]
     code_match = re.search(r"\(([A-Z]{5})\)", text)
     code = code_match.group(1) if code_match else None
     text = re.sub(r"\([A-Z]{5}\)", " ", text)

@@ -430,6 +430,7 @@ export type ComparisonTestResult = {
   total: number;
   comparable_total: number;
   pair_total: number;
+  not_comparable_total: number;
   review_total: number;
   status_confusion_matrix: Record<string, Record<string, number>>;
   field_metrics: Record<string, { support: number; precision: number; recall: number; f1: number; exact_accuracy: number }>;
@@ -440,7 +441,7 @@ export type ComparisonTestResult = {
   review_recall: number;
   review_f1: number;
   review_reasons: Record<string, { total: number; caught: number }>;
-  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; actual_fields: string[]; predicted_fields: string[]; review_reason?: string | null; correct: boolean }>;
+  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; actual_fields: string[]; predicted_fields: string[]; review_reason?: string | null; has_attachment_pair: boolean; correct: boolean }>;
 };
 
 export type EndToEndScore = {
