@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+import item_compare
+
 FIELD_ORDER = [
     "shipper",
     "consignee",
@@ -21,6 +23,7 @@ FIELD_ORDER = [
     "port_of_discharge",
     "container_count",
     "gross_weight_kg",
+    "description_of_goods",
 ]
 
 REVIEW_THRESHOLD = 0.85
@@ -94,6 +97,12 @@ LABEL_ALIASES = {
         "GROSS WT KG",
         "GROSS WT (KGS)",
         "GROSS WT (KG)",
+    },
+    "description_of_goods": {
+        "DESCRIPTION OF GOODS",
+        "DESCRIPTION",
+        "GOODS DESCRIPTION",
+        "PARTICULARS FURNISHED BY SHIPPER",
     },
 }
 
@@ -356,22 +365,35 @@ def extract_fields(document_text: Optional[str]) -> Dict[str, str]:
     """Extract recognized comparison fields from a plain-text document.
 
     Expected format: LABEL: value
+    For multi-line values, lines without a known label are appended to the current field.
     """
     if not document_text:
         return {}
 
     fields: Dict[str, str] = {}
+    current_field = None
+    
     for raw_line in str(document_text).splitlines():
         line = raw_line.strip()
-        if not line or ":" not in line:
+        if not line:
             continue
-        label_text, value_text = line.split(":", 1)
-        field_name = _canonical_field_name(label_text)
-        if field_name is None:
-            continue
-        value = value_text.strip()
-        if value:
-            fields[field_name] = value
+            
+        if ":" in line:
+            label_text, value_text = line.split(":", 1)
+            field_name = _canonical_field_name(label_text)
+            if field_name is not None:
+                current_field = field_name
+                value = value_text.strip()
+                if value:
+                    fields[current_field] = value
+                continue
+                
+        if current_field:
+            if current_field in fields:
+                fields[current_field] += "\n" + line
+            else:
+                fields[current_field] = line
+                
     return fields
 
 
@@ -381,7 +403,50 @@ def compare_document_pair(si_document: Optional[str], bl_document: Optional[str]
     bl_fields = extract_fields(bl_document)
     results: Dict[str, Dict[str, object]] = {}
     for field in FIELD_ORDER:
-        results[field] = compare_field(field, si_fields.get(field), bl_fields.get(field))
+        if field == "description_of_goods":
+            si_items = si_fields.get(field, "").split('\n')
+            bl_items = bl_fields.get(field, "").split('\n')
+            si_items = [x.strip() for x in si_items if x.strip()]
+            bl_items = [x.strip() for x in bl_items if x.strip()]
+            
+            if not si_items and not bl_items:
+                results[field] = {
+                    "field": field,
+                    "verdict": "REVIEW",
+                    "similarity": 0.0,
+                    "distance": 0,
+                    "note": "A required field is missing; review is required.",
+                    "item_results": []
+                }
+            elif not si_items or not bl_items:
+                results[field] = {
+                    "field": field,
+                    "verdict": "REVIEW",
+                    "similarity": 0.0,
+                    "distance": 0,
+                    "note": "A required field is empty; review is required.",
+                    "item_results": []
+                }
+            else:
+                item_results = item_compare.compare_items(si_items, bl_items)
+                verdicts = [res['verdict'] for res in item_results]
+                if 'MISMATCH' in verdicts:
+                    overall = 'MISMATCH'
+                elif 'REVIEW' in verdicts:
+                    overall = 'REVIEW'
+                else:
+                    overall = 'MATCH'
+                    
+                results[field] = {
+                    "field": field,
+                    "verdict": overall,
+                    "similarity": sum(r['cosine'] for r in item_results) / len(item_results) if item_results else 0.0,
+                    "distance": 0,
+                    "note": f"Item comparison: {len(item_results)} items processed.",
+                    "item_results": item_results
+                }
+        else:
+            results[field] = compare_field(field, si_fields.get(field), bl_fields.get(field))
     return results
 
 
@@ -395,11 +460,16 @@ def report_document_pair(si_document: Optional[str], bl_document: Optional[str])
         si_value = si_fields.get(field, "")
         bl_value = bl_fields.get(field, "")
         result = results[field]
-        print(
-            f"{field:<18} | SI: {si_value or 'MISSING':<35} | "
-            f"BL: {bl_value or 'MISSING':<35} | {result['verdict']:<7} | "
-            f"sim={result['similarity']:.2f} | dist={result['distance']}"
-        )
+        if field == "description_of_goods":
+            print(f"{field:<18} | {result['verdict']:<7} | sim={result['similarity']:.2f}")
+            for itm in result.get("item_results", []):
+                print(f"  -> SI: {itm['si']} | BL: {itm['bl']} | {itm['verdict']} | sim={itm['cosine']:.2f} | {itm['reason']}")
+        else:
+            print(
+                f"{field:<18} | SI: {si_value or 'MISSING':<35} | "
+                f"BL: {bl_value or 'MISSING':<35} | {result['verdict']:<7} | "
+                f"sim={result['similarity']:.2f} | dist={result['distance']}"
+            )
 
     if all(result["verdict"] == "MATCH" for result in results.values()):
         print("No mismatch detected.")
@@ -512,7 +582,7 @@ def main() -> None:
             print(f"{field}: {result['verdict']} | sim={result['similarity']:.2f} | dist={result['distance']}")
         return
 
-    si_path, bl_path = find_attachment_pair_for_email("email_001", "data_v2")
+    si_path, bl_path = find_attachment_pair_for_email("email_349", "data_v2")
     report_document_pair(read_text_file(si_path), read_text_file(bl_path))
 
 
