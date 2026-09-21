@@ -20,7 +20,6 @@ import {
   Moon,
   MoreHorizontal,
   PanelRight,
-  Play,
   RefreshCw,
   Search,
   Send,
@@ -36,9 +35,10 @@ import {
   type EmailRecord,
   type EmailStatus,
   type FieldResult
+  , type ClassificationTestResult
 } from "./api.ts";
 
-type View = "inbox" | "review" | "runs" | "export";
+type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
@@ -176,6 +176,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
               setMobileNav(false);
             }}
           />
+          <NavButton icon={<Activity size={16} />} label="Test" active={view === "test"} onClick={() => { setView("test"); setSelected(null); setMobileNav(false); }} />
           <NavButton
             icon={<BarChart3 size={16} />}
             label="Export"
@@ -266,6 +267,8 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
                   ? "Review queue"
                   : view === "runs"
                     ? "Run status"
+                    : view === "test"
+                      ? "Test"
                     : "Export"}
             </strong>
           </div>
@@ -349,6 +352,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
         {!loading && !loadError && view === "runs" && (
           <RunsView emails={emails} onNotify={notify} />
         )}
+        {!loading && !loadError && view === "test" && <TestView onNotify={notify} />}
         {!loading && !loadError && view === "export" && (
           <ExportView emails={emails} onNotify={notify} />
         )}
@@ -693,6 +697,15 @@ function DetailView({
   const [reclassify, setReclassify] = useState(false);
   const meta = statusMeta[email.status];
   const fields = email.fields ?? [];
+  const [edited, setEdited] = useState<Record<string, string>>({});
+  const reviewRequired = email.status === "Needs review" || email.checkRequired;
+  const processingLabel = email.classificationProvider === "gemini"
+    ? "LLM fallback"
+    : email.classificationProvider === "spacy"
+      ? "NLP comparison"
+      : email.classificationProvider === "primary+gemini_failed"
+        ? "NLP comparison · LLM fallback"
+        : "Classification pipeline";
   return (
     <section className="detail-layout">
       <div className="detail-header">
@@ -732,11 +745,11 @@ function DetailView({
             <div className="classification">
               <span className="category-badge">{email.category}</span>
               <span className="confidence">
-                {Math.round(email.categoryConfidence * 100)}% confidence
+                {(email.categoryConfidence * 100).toFixed(1)}% · {processingLabel}
               </span>
             </div>
             {reclassify && (
-              <select className="select-full">
+              <select className="select-full" defaultValue={email.category}>
                 <option>{email.category}</option>
                 <option>Comparison request</option>
                 <option>General</option>
@@ -760,7 +773,7 @@ function DetailView({
                   <FileText size={16} />
                   <div>
                     <strong>{file}</strong>
-                    <span>Text document · 12 KB</span>
+                  <span>Attachment available from inbox</span>
                   </div>
                   <button className="icon-button" aria-label={`View ${file}`}>
                     <PanelRight size={15} />
@@ -773,20 +786,20 @@ function DetailView({
           </div>
           <div className="context-section timeline-section">
             <div className="section-label">Pipeline timeline</div>
-            <TimelineStep label="Ingested" time="09:42:04" state="done" />
+            <TimelineStep label="Ingested" time="Completed" state="done" />
             <TimelineStep
               label="Classified"
-              time="09:42:05 · 0.8s"
+              time="Completed from API"
               state="done"
             />
             <TimelineStep
               label="Extracted"
-              time="09:42:08 · 2.7s"
+              time="Completed on demand"
               state={email.status === "Failed" ? "failed" : "done"}
             />
             <TimelineStep
               label="Compared"
-              time={email.status === "Failed" ? "Waiting" : "09:42:09 · 0.9s"}
+              time={email.status === "Failed" ? "Waiting" : "Completed on demand"}
               state={email.status === "Failed" ? "waiting" : "done"}
             />
             <TimelineStep
@@ -800,7 +813,7 @@ function DetailView({
             />
             {email.status === "Failed" && (
               <div className="timeline-error">
-                <strong>OCR service timed out</strong>
+                <strong>{email.reason ?? "Processing failed"}</strong>
                 <span>Try the step again to continue.</span>
                 <button
                   className="button button-small"
@@ -857,11 +870,11 @@ function DetailView({
                 >
                   <strong>{field.field}</strong>
                   <span className="value-cell">
-                    <code>{field.si}</code>
+                  {reviewRequired ? <input className="review-input" aria-label={`${field.field} SI value`} defaultValue={field.si} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_si`]: e.target.value }))} /> : <code>{field.si}</code>}
                     <Confidence value={field.confidence} />
                   </span>
                   <span className="value-cell">
-                    <code>{field.bl}</code>
+                    {reviewRequired ? <input className="review-input" aria-label={`${field.field} BL value`} defaultValue={field.bl} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_bl`]: e.target.value }))} /> : <code>{field.bl}</code>}
                     <Confidence value={field.confidence} />
                   </span>
                   <span>
@@ -896,6 +909,12 @@ function DetailView({
               the evidence icon to inspect the source snippet.
             </span>
           </div>
+          {reviewRequired && (
+            <div className="review-save-bar">
+              <span><AlertTriangle size={15} /> Check required · edit values, then resolve this case.</span>
+              <button className="button button-primary" onClick={async () => { await api.correct(email.id, edited); onNotify("Correction saved and review resolved"); }}>Save correction</button>
+            </div>
+          )}
         </div>
       </div>
       {evidence && (
@@ -1042,7 +1061,7 @@ function ReviewView({
         <div>
           <span className="status status-review">
             <span className="status-dot" />
-            Oldest case · 42m
+            Review cases are ordered by the inbox source
           </span>
         </div>
       </div>
@@ -1071,7 +1090,7 @@ function ReviewView({
             <div className="review-fields">
               <span>Affected</span>
               <b>
-                {email.id === "email_009" ? "Attachment missing" : "Consignee"}
+                {email.missingAttachment ? "Attachment missing" : email.fields?.filter((field) => field.result === "review" || field.result === "mismatch").map((field) => field.field).join(", ") || "Classification confidence"}
               </b>
             </div>
             <ChevronRight size={17} />
@@ -1087,6 +1106,23 @@ function ReviewView({
       </div>
     </section>
   );
+}
+
+function TestView({ onNotify }: { onNotify: (message: string) => void }) {
+  const [run, setRun] = useState<ClassificationTestResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [selected, setSelected] = useState<ClassificationTestResult["results"][number] | null>(null);
+  const execute = async () => { setRunning(true); try { setRun(await api.runClassificationTest()); onNotify("Classification test completed"); } catch (error) { onNotify(error instanceof Error ? error.message : "Test failed"); } finally { setRunning(false); } };
+  const labels = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"];
+  return <section className="page-wrap">
+    <div className="page-heading"><div><h1>Pipeline test</h1><p>Re-run classification across all 520 emails against the private ground truth.</p></div><button className="button button-primary" onClick={execute} disabled={running}><RefreshCw size={15} /> {running ? "Running 520 emails..." : "Run classification test"}</button></div>
+    {!run ? <div className="empty-state"><Activity size={24} /><strong>No test run yet</strong><span>Run the complete classification pipeline to inspect accuracy and errors.</span></div> : <>
+      <div className="stats-strip"><div className="stat"><span>Accuracy</span><strong>{(run.accuracy * 100).toFixed(1)}%</strong><small>{run.correct} / {run.total} correct</small></div><div className="stat"><span>Macro precision</span><strong>{(run.macro.precision * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro sensitivity</span><strong>{(run.macro.recall * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro F1</span><strong>{(run.macro.f1 * 100).toFixed(1)}%</strong></div><div className="stat"><span>Review escalations</span><strong>{run.review_count}</strong></div></div>
+      <div className="test-grid"><div><div className="panel-heading"><div><span className="eyebrow">CONFUSION MATRIX</span><h2>Actual versus predicted</h2></div></div><div className="matrix-wrap"><table className="test-matrix"><thead><tr><th>Actual \ Predicted</th>{labels.map(label => <th key={label}>{label.replace("_", " ")}</th>)}</tr></thead><tbody>{labels.map(actual => <tr key={actual}><th>{actual.replace("_", " ")}</th>{labels.map(predicted => <td className={actual === predicted ? "matrix-correct" : ""} key={predicted}>{run.confusion_matrix[actual]?.[predicted] ?? 0}</td>)}</tr>)}</tbody></table></div></div><div className="score-panel"><span className="eyebrow">PER-CATEGORY QUALITY</span>{labels.map(label => <div className="test-metric" key={label}><strong>{label.replace("_", " ")}</strong><span>P {(run.per_category[label].precision * 100).toFixed(1)}% · R {(run.per_category[label].recall * 100).toFixed(1)}% · F1 {(run.per_category[label].f1 * 100).toFixed(1)}%</span><small>{run.per_category[label].support} actual records</small></div>)}</div></div>
+      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Ground truth versus classifier</h2></div></div><div className="test-result-head"><span>Email</span><span>Ground truth</span><span>Predicted</span><span>Confidence</span><span /></div>{run.results.filter(item => !item.correct).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{(item.confidence * 100).toFixed(1)}%</span><ChevronRight size={15} /></button>)}{run.results.every(item => item.correct) && <div className="empty-state"><CheckCircle2 size={22} /><strong>No misclassifications</strong></div>}</div>
+      {selected && <div className="test-detail"><button className="icon-button" onClick={() => setSelected(null)}><X size={16} /></button><span className="eyebrow">TEST DETAIL</span><h2>{selected.email_id}</h2><p>{selected.subject}</p><div className="test-detail-values"><span>Ground truth<strong>{selected.actual}</strong></span><span>Predicted<strong>{selected.predicted}</strong></span><span>Score<strong>{(selected.confidence * 100).toFixed(1)}%</strong></span><span>Path<strong>{selected.provider === "spacy" ? "NLP comparison" : "LLM fallback"}</strong></span></div>{selected.review_reason && <p className="reason-copy">{selected.review_reason}</p>}</div>}
+    </>}
+  </section>;
 }
 
 function RunsView({
@@ -1256,7 +1292,7 @@ function ExportView({
             <>
               <div className="score-result">
                 <strong>
-                  {score === null ? "—" : (score * 100).toFixed(1)}
+                  {score === null ? "—" : `${(score * 100).toFixed(1)}%`}
                 </strong>
                 <span>/ 100</span>
               </div>
