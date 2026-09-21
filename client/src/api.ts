@@ -201,6 +201,34 @@ async function processEmail(
 ): Promise<EmailRecord> {
   const record = existing ?? summary(raw);
   if (record.category !== "Comparison request") return record;
+  // The backend owns document extraction and comparison so the UI uses the
+  // same pipeline as the notebook, including PDF/DOCX/XLSX attachments.
+  try {
+    const comparison = await request<{
+      status: "OK" | "MISMATCH" | "NEEDS_REVIEW";
+      review_reason?: string | null;
+      fields?: Array<{ field: string; si: string; bl: string; result: "match" | "mismatch" | "review"; confidence: number; evidence: string }>;
+    }>(`/comparisons/${encodeURIComponent(raw.email_id)}`);
+    const fields = (comparison.fields ?? []).map((field) => ({
+      ...field,
+      field: field.field.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    }));
+    const mismatches = fields.filter((field) => field.result === "mismatch");
+    const review = fields.filter((field) => field.result === "review");
+    return {
+      ...record,
+      fields,
+      status: comparison.status === "MISMATCH" ? "Mismatch" : comparison.status === "OK" ? "Match" : "Needs review",
+      result: comparison.status === "MISMATCH"
+        ? `${mismatches.length} field${mismatches.length === 1 ? "" : "s"} differ`
+        : comparison.status === "OK" ? "No mismatch detected" : `${review.length || 1} field${review.length === 1 ? "" : "s"} need review`,
+      reason: comparison.review_reason ?? undefined,
+      missingAttachment: comparison.review_reason === "missing_attachment",
+    };
+  } catch {
+    // Keep the existing local fallback for local development when the backend
+    // comparison service is unavailable.
+  }
   if (raw.attachments.length < 2)
     return {
       ...record,

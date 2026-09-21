@@ -40,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from classification import MailClassifier
+from comparison_service import compare_email
 from persistence import save_classification, save_classifications_batch, get_classifications_batch, save_comparison, get_comparisons_batch, save_pipeline_run, get_recent_runs
 
 import scoring
@@ -160,6 +161,12 @@ def correct_classification(email_id: str, correction: Correction):
 # --------------------------------------------------------------------------
 # comparison persistence
 # --------------------------------------------------------------------------
+@app.get("/comparisons/{email_id}")
+def run_comparison(email_id: str):
+    get_email(email_id)
+    return compare_email(email_id, DATA_DIR)
+
+
 @app.post("/comparisons/{email_id}")
 def persist_comparison(email_id: str, request_body: dict):
     """Save a comparison result for an email."""
