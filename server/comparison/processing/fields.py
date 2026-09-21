@@ -14,7 +14,7 @@ def process_entity_field(field: str, left: str, right: str):
         return result(field, "REVIEW", 0, "missing value")
     def identity(value: str) -> str:
         value = re.split(
-            r"\||\bON BEHALF OF\b|;|\s+#?\d|\s+(?:[A-Z0-9-]+\s+)?(?:BLDG|BUILDING|ROAD|STREET|AVENUE|PLACE|DRIVE)\b",
+            r"\||\bON BEHALF OF\b|;|\bP\.?\s*O\.?\s*BOX\b|\s+#?\d|\s+(?:[A-Z0-9-]+\s+)?(?:BLDG|BUILDING|ROAD|STREET|AVENUE|PLACE|DRIVE)\b",
             str(value), maxsplit=1, flags=re.IGNORECASE,
         )[0]
         return normalize_text(value)
@@ -49,6 +49,18 @@ def process_numeric_field(field: str, left: str, right: str):
 
 
 def process_field(field: str, left: str, right: str):
+    # Fast path for every field: case and whitespace differences alone cannot
+    # be a document discrepancy. Field-specific parsing follows only when the
+    # values are genuinely different.
+    if left and right:
+        left_basic = " ".join(str(left).casefold().split())
+        right_basic = " ".join(str(right).casefold().split())
+        if left_basic == right_basic:
+            return result(field, "MATCH", 1, "case-insensitive string match")
+        left_compact = re.sub(r"[^a-z0-9]", "", left_basic)
+        right_compact = re.sub(r"[^a-z0-9]", "", right_basic)
+        if left_compact == right_compact:
+            return result(field, "MATCH", 1, "format-insensitive string match")
     if field in {"container_count", "gross_weight_kg"}:
         return process_numeric_field(field, left, right)
     if field in {"port_of_loading", "port_of_discharge"}:
