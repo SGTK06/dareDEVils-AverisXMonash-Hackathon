@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,10 +35,24 @@ def compare_email(email_id: str, data_dir: str | Path) -> dict[str, Any]:
     email = json.loads(email_path.read_text(encoding="utf-8"))
     attachments = email.get("attachments") or []
     if len(attachments) < 2:
+        body = str(email.get("body", ""))
+        # Main-set messages are requests to send a future draft BL. They are
+        # not failed comparisons. The edge set explicitly asks to compare
+        # documents and states that attachments are missing.
+        pending_draft_request = bool(re.search(r"send\s+the\s+draft\s+BL", body, re.IGNORECASE)) and not bool(
+            re.search(r"compare\s+the\s+SI\s+and\s+draft\s+BL|attachments?\s+appear\s+to\s+have\s+been\s+dropped|draft\s+BL\s+is\s+still\s+missing", body, re.IGNORECASE)
+        )
+        if pending_draft_request:
+            return {
+                "email_id": email_id, "status": "OK", "review_reason": None,
+                "not_comparable": True, "review_required": False,
+                "has_defect": False, "defect_fields": [], "fields": [],
+            }
         return {
             "email_id": email_id,
             "status": "NEEDS_REVIEW",
             "review_reason": "missing_attachment",
+            "not_comparable": True, "review_required": True,
             "has_defect": False,
             "defect_fields": [],
             "fields": [],
@@ -49,7 +64,7 @@ def compare_email(email_id: str, data_dir: str | Path) -> dict[str, Any]:
         raw_si, raw_bl = extract_fields(si_text), extract_fields(bl_text)
         raw_results = compare_documents(si_text, bl_text)
     except FileNotFoundError:
-        return {"email_id": email_id, "status": "NEEDS_REVIEW", "review_reason": "missing_attachment", "has_defect": False, "defect_fields": [], "fields": []}
+        return {"email_id": email_id, "status": "NEEDS_REVIEW", "review_reason": "missing_attachment", "not_comparable": True, "review_required": True, "has_defect": False, "defect_fields": [], "fields": []}
     except Exception as exc:
         return {"email_id": email_id, "status": "NEEDS_REVIEW", "review_reason": "unreadable", "has_defect": False, "defect_fields": [], "fields": [], "error": str(exc)}
 
