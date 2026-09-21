@@ -2,6 +2,7 @@
 import os
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 import httpx
 
@@ -181,6 +182,7 @@ def save_pipeline_run(
         rows = response.json()
         if rows and isinstance(rows, list):
             return rows[0].get("id")
+    print(f"save_pipeline_run failed: {response.status_code} {response.text}")
     return None
 
 
@@ -197,3 +199,37 @@ def get_recent_runs(run_type: str | None = None, limit: int = 20) -> list[dict]:
     if response.status_code != 200:
         return []
     return response.json()
+
+
+# ── Field Overrides (Local JSON Storage) ─────────────────────
+
+def _overrides_path() -> Path:
+    from app import DATA_DIR
+    return DATA_DIR / "overrides.json"
+
+def get_field_overrides(email_id: str) -> dict[str, dict[str, str]]:
+    """Fetch field overrides for an email ID. Returns dict like {'si': {'field': 'val'}, 'bl': {...}}"""
+    path = _overrides_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get(email_id, {})
+    except Exception:
+        return {}
+
+def save_field_override(email_id: str, doc_type: str, field_name: str, value: str) -> None:
+    """Save an operator override for an extracted field."""
+    path = _overrides_path()
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if email_id not in data:
+        data[email_id] = {}
+    if doc_type not in data[email_id]:
+        data[email_id][doc_type] = {}
+    data[email_id][doc_type][field_name] = value
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")

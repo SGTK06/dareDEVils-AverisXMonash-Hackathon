@@ -40,10 +40,13 @@ import {
   ,type EndToEndScore
 } from "./api.ts";
 
+import { loadPreferences, savePreferencesDebounced } from "./lib/supabaseHelpers";
+
 type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
+  userId: string;
   onSignOut: () => void;
 };
 
@@ -55,11 +58,11 @@ const statusMeta: Record<EmailStatus, { label: string; className: string }> = {
   Classified: { label: "Classified", className: "status-neutral" }
 };
 
-function Dashboard({ userEmail, onSignOut }: DashboardProps) {
+function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   const [view, setView] = useState<View>("inbox");
   const [selected, setSelected] = useState<EmailRecord | null>(null);
   const [query, setQuery] = useState("");
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => localStorage.getItem("theme") === "dark");
   const [filter, setFilter] = useState<EmailStatus | "All">("All");
   const [toast, setToast] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -67,9 +70,30 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  useEffect(() => {
+    loadPreferences(userId).then(prefs => {
+      setDark(prefs.theme === "dark");
+      setView((prefs.last_view as View) || "inbox");
+      if (prefs.filters && typeof prefs.filters.status === "string") {
+         setFilter(prefs.filters.status as any);
+      }
+      setPrefsLoaded(true);
+    });
+  }, [userId]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
+    localStorage.setItem("theme", dark ? "dark" : "light");
+    
+    if (prefsLoaded) {
+      savePreferencesDebounced(userId, {
+        theme: dark ? "dark" : "light",
+        last_view: view,
+        filters: { status: filter }
+      });
+    }
     const handler = (event: KeyboardEvent) => {
       if (event.key === "/" && document.activeElement?.tagName !== "INPUT") {
         event.preventDefault();
@@ -84,7 +108,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [dark]);
+  }, [dark, view, filter, prefsLoaded, userId]);
 
   useEffect(() => {
     api
@@ -204,7 +228,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
           <span className="health-dot" />
           Pipeline healthy <span className="health-time">2m ago</span>
         </div>
-        <button className="nav-button muted">
+        <button className="nav-button muted" onClick={() => notify("Settings coming soon!")}>
           <Settings2 size={16} /> Settings
         </button>
 
@@ -358,10 +382,13 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
           </>
         )}
         {!loading && !loadError && view === "review" && (
-          <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} />
+          <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} onRefresh={() => {
+            api.listEmails().then(setEmails);
+            notify("Review queue refreshed");
+          }} />
         )}
         {!loading && !loadError && view === "runs" && (
-          <RunsView emails={emails} onNotify={notify} />
+          <RunsView onNotify={notify} />
         )}
         {!loading && !loadError && view === "test" && (
           <TestView onNotify={notify} />
@@ -436,10 +463,6 @@ function InboxView({
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50; // Set to 50 emails per page
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [query, filter]);
 
   const totalPages = Math.ceil(list.length / pageSize) || 1;
   const paginatedEmails = useMemo(() => {
@@ -516,7 +539,10 @@ function InboxView({
           <input
             id="global-search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setCurrentPage(1);
+              setQuery(event.target.value);
+            }}
             placeholder="Search emails, senders, IDs..."
           />
           <kbd>/</kbd>
@@ -525,9 +551,10 @@ function InboxView({
           <Filter size={15} />
           <select
             value={filter}
-            onChange={(event) =>
-              setFilter(event.target.value as EmailStatus | "All")
-            }
+            onChange={(event) => {
+              setCurrentPage(1);
+              setFilter(event.target.value as EmailStatus | "All");
+            }}
             aria-label="Filter by status"
           >
             <option value="All">All statuses</option>
@@ -537,7 +564,7 @@ function InboxView({
             <option>Failed</option>
             <option>Classified</option>
           </select>
-          <button className="button button-quiet">
+          <button className="button button-quiet" onClick={() => notify("Advanced filtering coming soon!")}>
             <Filter size={14} /> More filters
           </button>
         </div>
@@ -680,7 +707,11 @@ function EmailRow({
           className="row-action"
           onClick={(event) => {
             event.stopPropagation();
-            email.status === "Failed" ? onRetry(email.id) : onOpen(email);
+            if (email.status === "Failed") {
+              onRetry(email.id);
+            } else {
+              onOpen(email);
+            }
           }}
           aria-label={
             email.status === "Failed" ? `Retry ${email.id}` : `Open ${email.id}`
@@ -711,7 +742,7 @@ function DetailView({
   const meta = statusMeta[email.status];
   const fields = email.fields ?? [];
   const [edited, setEdited] = useState<Record<string, string>>({});
-  const reviewRequired = email.status === "Needs review" || email.checkRequired;
+  const reviewRequired = email.status === "Needs review" || email.status === "Mismatch" || email.checkRequired;
   const processingLabel =
     email.classificationProvider === "gemini"
       ? "LLM fallback"
@@ -727,11 +758,11 @@ function DetailView({
           <ArrowLeft size={16} /> Back to inbox
         </button>
         <div className="detail-actions">
-          <button className="button button-quiet">
+          <button className="button button-quiet" onClick={() => {
+            navigator.clipboard.writeText(email.id);
+            onNotify("ID copied to clipboard");
+          }}>
             <Clipboard size={14} /> Copy ID
-          </button>
-          <button className="button button-quiet">
-            <MoreHorizontal size={15} />
           </button>
         </div>
       </div>
@@ -790,7 +821,7 @@ function DetailView({
                     <strong>{file}</strong>
                     <span>Attachment available from inbox</span>
                   </div>
-                  <button className="icon-button" aria-label={`View ${file}`}>
+                  <button className="icon-button" aria-label={`View ${file}`} onClick={() => window.open(`http://localhost:8000/attachments/${file}`, "_blank")}>
                     <PanelRight size={15} />
                   </button>
                 </div>
@@ -868,7 +899,15 @@ function DetailView({
                     : (email.reason ?? email.result)}
               </p>
             </div>
-            <button className="button button-quiet">
+            <button className="button button-quiet" onClick={() => {
+              const blob = new Blob([JSON.stringify(email, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${email.id}_evidence.json`;
+              a.click();
+              onNotify("Evidence downloaded");
+            }}>
               <Download size={14} /> Download evidence
             </button>
           </div>
@@ -963,8 +1002,21 @@ function DetailView({
               <button
                 className="button button-primary"
                 onClick={async () => {
-                  await api.correct(email.id, edited);
-                  onNotify("Correction saved and review resolved");
+                  if (email.category === "Comparison request") {
+                    await api.correctComparison(email.id, edited);
+                    const updatedEmail = await api.getEmail(email.id);
+                    onNotify("Comparison field override saved and verified");
+                    // Assuming onBack or an onReload prop exists to refresh the UI, 
+                    // but we can just let React handle it if we trigger a parent reload.
+                    // Instead of a full reload, we can trigger re-fetch by doing:
+                    // Actually, Dashboard relies on polling or manual re-render, 
+                    // but since api.ts mutates cache, we might need a way to refresh it.
+                    // The easiest way is to close the detail view.
+                    onBack();
+                  } else {
+                    await api.correct(email.id, edited);
+                    onNotify("Correction saved and review resolved");
+                  }
                 }}
               >
                 Save correction
@@ -1091,6 +1143,7 @@ function ReviewView({
   emails: EmailRecord[];
   onOpen: (email: EmailRecord) => void;
   onNotify: (message: string) => void;
+  onRefresh: () => void;
 }) {
   const reviewEmails = emails.filter(
     (email) => email.status === "Needs review"
@@ -1104,7 +1157,7 @@ function ReviewView({
         </div>
         <button
           className="button button-primary"
-          onClick={() => onNotify("Review queue is up to date")}
+          onClick={onRefresh}
         >
           <RefreshCw size={15} /> Refresh queue
         </button>
@@ -1182,6 +1235,15 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
   const [selected, setSelected] = useState<
     ClassificationTestResult["results"][number] | null
   >(null);
+
+  useEffect(() => {
+    api.getRuns("classification_test", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        setRun(runs[0].results as ClassificationTestResult);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try {
@@ -1403,6 +1465,15 @@ function ComparisonTestView({ onNotify, onBack, onEndToEnd }: { onNotify: (messa
   const [run, setRun] = useState<ComparisonTestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [selected, setSelected] = useState<ComparisonTestResult["results"][number] | null>(null);
+
+  useEffect(() => {
+    api.getRuns("full_pipeline", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        setRun(runs[0].results as ComparisonTestResult);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try { setRun(await api.runComparisonTest()); onNotify("Comparison test completed"); }
@@ -1443,6 +1514,16 @@ function ComparisonTestView({ onNotify, onBack, onEndToEnd }: { onNotify: (messa
 function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (message: string) => void; onBack: () => void; onComparison: () => void }) {
   const [score, setScore] = useState<EndToEndScore | null>(null);
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    api.getRuns("submission", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        const res = runs[0].results as any;
+        setScore(res.final_score !== undefined ? res : null);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try {
@@ -1464,79 +1545,71 @@ function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (messa
 }
 
 function RunsView({
-  emails,
   onNotify
 }: {
-  emails: EmailRecord[];
   onNotify: (message: string) => void;
 }) {
-  const failed = emails.filter((email) => email.status === "Failed").length;
-  const comparisons = emails.filter(
-    (email) => email.category === "Comparison request"
-  ).length;
+  const [runs, setRuns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getRuns().then(data => {
+      setRuns(data);
+      setLoading(false);
+    }).catch(err => {
+      onNotify("Failed to fetch runs");
+      setLoading(false);
+    });
+  }, [onNotify]);
+
+  const formatDate = (ds: string) => new Date(ds).toLocaleString();
+
   return (
     <section className="page-wrap">
       <div className="page-heading">
         <div>
-          <h1>Run status</h1>
-          <p>Processing history across the current inbox.</p>
+          <h1>Pipeline Runs</h1>
+          <p>History of pipeline test and submission runs from the database.</p>
         </div>
         <button
           className="button button-primary"
-          onClick={() => onNotify("Retrying all failed items")}
+          onClick={() => {
+            setLoading(true);
+            api.getRuns().then(data => {
+              setRuns(data);
+              setLoading(false);
+              onNotify("Refreshed runs");
+            });
+          }}
         >
-          <RefreshCw size={15} /> Retry all failed
+          <RefreshCw size={15} /> Refresh
         </button>
       </div>
-      <div className="run-overview">
-        <div>
-          <span className="eyebrow">CURRENT RUN</span>
-          <strong>Inbox sync · live source</strong>
-          <span>{emails.length} emails · Loaded from verification service</span>
-        </div>
-        <span className="run-pill">
-          <span className="health-dot" />
-          {emails.length - failed} complete · {failed} failed
-        </span>
-      </div>
+      
       <div className="run-table">
-        <div className="run-head">
-          <span>Step</span>
-          <span>Completed</span>
-          <span>Failed</span>
-          <span>Avg. duration</span>
+        <div className="run-head" style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
+          <span>Run Type</span>
+          <span>Started At</span>
           <span>Status</span>
+          <span>Emails</span>
+          <span>Score</span>
         </div>
-        {[
-          ["Ingest", emails.length.toString(), "0", "—", "Complete"],
-          ["Classify", emails.length.toString(), "0", "—", "Complete"],
-          [
-            "Extract",
-            (emails.length - failed).toString(),
-            failed.toString(),
-            "On demand",
-            failed ? `${failed} failed` : "Complete"
-          ],
-          ["Compare", comparisons.toString(), "0", "On demand", "Complete"],
-          ["Export", "—", "—", "—", "Waiting"]
-        ].map((row) => (
-          <div className="run-row" key={row[0]}>
-            <strong>{row[0]}</strong>
-            <span>{row[1]}</span>
-            <span className={row[2] === "1" ? "result-alert" : ""}>
-              {row[2]}
+        {loading ? <div style={{ padding: "24px", textAlign: "center" }}>Loading runs...</div> : runs.length === 0 ? <div style={{ padding: "24px", textAlign: "center" }}>No runs found in database.</div> : runs.map((run) => (
+          <div className="run-row" key={run.id} style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
+            <strong>{run.run_type}</strong>
+            <span>{formatDate(run.started_at)}</span>
+            <span className="status-cell">
+              {run.status === "success" ? (
+                <CheckCircle2 className="icon-success" size={16} />
+              ) : run.status === "failed" ? (
+                <XCircle className="icon-error" size={16} />
+              ) : (
+                <Clock3 className="icon-neutral" size={16} />
+              )}
+              {run.status}
             </span>
-            <span className="mono">{row[3]}</span>
-            <span
-              className={
-                row[4] === "1 failed"
-                  ? "status status-failed"
-                  : "status status-neutral"
-              }
-            >
-              <span className="status-dot" />
-              {row[4]}
-            </span>
+            <span className="mono">{run.email_count ?? "—"}</span>
+            <strong className={run.score !== null ? "" : "status-neutral"}>{run.score !== null ? (run.score * 100).toFixed(1) + "%" : "—"}</strong>
           </div>
         ))}
       </div>

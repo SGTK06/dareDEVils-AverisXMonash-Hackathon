@@ -211,6 +211,56 @@ def needs_human_review(result: dict) -> bool:
 
 
 # ---------------------------------------------------------
+# Discrepancy Verification
+# ---------------------------------------------------------
+
+VERIFICATION_PROMPT = """
+You are verifying a potential semantic discrepancy between two extracted fields from a Shipping Instruction (SI) and a Bill of Lading (BL).
+Your goal is to determine if the two values represent the same underlying entity, location, or quantity despite minor formatting differences.
+
+Ignore harmless formatting variations such as:
+- Abbreviations (e.g., "Ltd" vs "Limited", "Co." vs "Company")
+- Extra context or port codes (e.g., "Port Klang" vs "MYPKG / Port Klang")
+- Trailing punctuation or whitespace
+- Minor numeric formatting (e.g., "22,000 KGS" vs "22000.0 kg")
+
+Return a JSON object strictly matching this schema:
+{
+  "field_name": "string",
+  "is_mismatch": boolean,
+  "explanation": "string",
+  "confidence": "HIGH" | "MEDIUM" | "LOW"
+}
+"""
+
+def verify_discrepancy(field_name: str, si_value: str, bl_value: str) -> dict:
+    """
+    Asks Gemini to verify if an SI vs BL field discrepancy is genuine.
+    """
+    prompt = f"""
+{VERIFICATION_PROMPT}
+
+Field: {field_name}
+SI Value: "{si_value}"
+BL Value: "{bl_value}"
+"""
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config={
+            "temperature": 0,
+            "response_mime_type": "application/json",
+        },
+    )
+    if not response.text:
+        return {"field_name": field_name, "is_mismatch": True, "explanation": "Empty LLM response", "confidence": "LOW"}
+    try:
+        return json.loads(response.text)
+    except Exception as e:
+        return {"field_name": field_name, "is_mismatch": True, "explanation": f"JSON Error: {str(e)}", "confidence": "LOW"}
+
+
+# ---------------------------------------------------------
 # Test
 # ---------------------------------------------------------
 
