@@ -42,6 +42,8 @@ export type EmailRecord = {
   reason?: string;
   fields?: FieldResult[];
   raw?: RawEmail;
+  checkRequired?: boolean;
+  classificationProvider?: string;
 };
 
 type Submission = Record<
@@ -71,25 +73,6 @@ const fieldDefinitions = [
   { name: "Gross weight (kg)", labels: ["gross weight", "gross wt"] }
 ];
 
-const categoryPatterns: Array<[Category, RegExp, number]> = [
-  ["Spam", /prize|winner|parcel fee|mailbox full|phishing|claim your/i, 0.99],
-  [
-    "Invoice query",
-    /invoice|billing|local charges|freight charge|d&d|demurrage/i,
-    0.96
-  ],
-  [
-    "New SI request",
-    /request si|si needed|cust si|shipping instruction needed/i,
-    0.95
-  ],
-  [
-    "Comparison request",
-    /draft bl|request bl|confirm docs|check document|bl amendment|to confirm docs|bill of lading/i,
-    0.93
-  ]
-];
-
 const apiBase = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const endpoint = (path: string) => `${apiBase}${path}`;
 const cache = new Map<string, EmailRecord>();
@@ -103,16 +86,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function classify(email: RawEmail): { category: Category; confidence: number } {
-  const content = `${email.subject}\n${email.body}`;
-  const match = categoryPatterns.find(([, pattern]) => pattern.test(content));
-  return match
-    ? { category: match[0], confidence: match[2] }
-    : { category: "General", confidence: 0.78 };
+function classify(): { category: Category; confidence: number } {
+  return { category: "General", confidence: 0 };
 }
 
 function summary(email: RawEmail): EmailRecord {
-  const { category, confidence } = classify(email);
+  const { category, confidence } = classify();
   const comparison = category === "Comparison request";
   const missing = comparison && email.attachments.length < 2;
   return {
@@ -204,7 +183,7 @@ function extractFields(siText: string, blText: string): FieldResult[] {
             ? "match"
             : "normalized"
           : "mismatch",
-      confidence: missing ? 0.35 : 0.94,
+      confidence: missing ? 0 : same ? 1 : 0.72,
       evidence: bl || si || "No source value found"
     };
   });
@@ -297,17 +276,45 @@ function toSubmission(records: EmailRecord[]): Submission {
 }
 
 export const api = {
+  async runClassificationTest() {
+    return request<ClassificationTestResult>("/tests/classification", { method: "POST" });
+  },
   async listEmails() {
     const raw = await request<RawEmail[]>("/emails");
     const records = raw.map(summary);
+    const classifications = await request<{ results: Array<{ email_id: string; category: string; confidence: number; check_required: boolean; review_reason?: string }> }>("/classifications/run", { method: "POST" });
+    const byId = new Map(classifications.results.map((item) => [item.email_id, item]));
+    records.forEach((record) => {
+      const classification = byId.get(record.id);
+      if (!classification) return;
+      const categoryMap: Record<string, Category> = { BL_COMPARISON: "Comparison request", SI_REQUEST: "New SI request", INVOICE_QUERY: "Invoice query", GENERAL: "General", SPAM: "Spam" };
+      record.category = categoryMap[classification.category] ?? "General";
+      record.categoryConfidence = classification.confidence;
+      record.checkRequired = classification.check_required;
+      if (classification.check_required) { record.status = "Needs review"; record.reason = classification.review_reason ?? "Low classification confidence"; }
+    });
     records.forEach((record) => cache.set(record.id, record));
     return records;
   },
   async getEmail(id: string) {
     const raw = await request<RawEmail>(`/emails/${encodeURIComponent(id)}`);
     const record = await processEmail(raw, cache.get(id));
+    try {
+      const classification = await request<{ check_required: boolean; category: string; confidence: number; provider?: string }>(`/classifications/${encodeURIComponent(id)}`);
+      record.category = classification.category === "BL_COMPARISON" ? "Comparison request" : classification.category === "SI_REQUEST" ? "New SI request" : classification.category === "INVOICE_QUERY" ? "Invoice query" : classification.category === "SPAM" ? "Spam" : "General";
+      record.categoryConfidence = classification.confidence;
+      record.checkRequired = classification.check_required;
+      record.classificationProvider = classification.provider;
+      if (classification.check_required && record.status === "Classified") record.status = "Needs review";
+    } catch { /* classification service is optional during local development */ }
     cache.set(id, record);
     return record;
+  },
+  async correct(id: string, correctedValues: Record<string, string>, category?: string) {
+    await request(`/classifications/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ corrected_values: correctedValues, category }) });
+    const current = cache.get(id);
+    if (current) { const updated = { ...current, status: "Classified" as EmailStatus, result: "Review resolved", checkRequired: false }; cache.set(id, updated); return updated; }
+    return this.getEmail(id);
   },
   async retry(id: string) {
     return this.getEmail(id);
@@ -349,4 +356,12 @@ export const api = {
       body: JSON.stringify(submission)
     });
   }
+};
+
+export type ClassificationTestResult = {
+  total: number; correct: number; accuracy: number; review_count: number;
+  confusion_matrix: Record<string, Record<string, number>>;
+  per_category: Record<string, { support: number; precision: number; recall: number; f1: number }>;
+  macro: { precision: number; recall: number; f1: number };
+  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; confidence: number; provider: string; check_required: boolean; review_reason?: string; correct: boolean }>;
 };
