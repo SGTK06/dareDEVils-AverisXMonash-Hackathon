@@ -31,7 +31,7 @@ def main():
         rng = np.random.default_rng(42)
         selected = rng.choice(len(groups[label]), n_train, replace=False)
         train.extend(groups[label][i] for i in selected)
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer(str(ROOT / "models" / "all-MiniLM-L6-v2"))
     X = model.encode([preprocess_email(email) for email, _ in train], normalize_embeddings=True, show_progress_bar=True)
     y = [label for _, label in train]
     classifier = RandomForestClassifier(n_estimators=500, max_features="sqrt", class_weight="balanced", random_state=42, n_jobs=-1)

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -6,10 +7,13 @@ WORKDIR /app
 # --trusted-host lets the build succeed behind corporate proxies that inject a
 # self-signed cert into the TLS chain (harmless on normal networks).
 COPY server/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \
     -r requirements.txt
+
+ENV HF_HUB_OFFLINE=1
 # app code (data + ground truth come in as mounts, not baked into the image)
 COPY server/scoring.py server/app.py server/score_cli.py server/persistence.py ./
 COPY server/classification ./classification

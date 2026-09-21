@@ -23,6 +23,8 @@ services:
     environment:
       DATA_DIR: /data
       GROUND_TRUTH: /secrets/ground_truth.json
+      CLASSIFIER_MODEL_PATH: /app/models/random_forest_classifier.joblib
+      EMBEDDING_MODEL: /app/models/all-MiniLM-L6-v2
       # REVEAL_GT: "1"            # uncomment to enable GET /ground_truth
       # JUDGE_TOKEN: "change-me"  # and require this token header
     restart: unless-stopped

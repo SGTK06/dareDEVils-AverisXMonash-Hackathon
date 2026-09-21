@@ -699,7 +699,9 @@ function DetailView({
   const fields = email.fields ?? [];
   const [edited, setEdited] = useState<Record<string, string>>({});
   const reviewRequired = email.status === "Needs review" || email.checkRequired;
-  const processingLabel = email.classificationProvider === "gemini"
+  const processingLabel = email.classificationProvider === "random_forest"
+    ? "Sentence Transformer · Random Forest"
+    : email.classificationProvider === "gemini"
     ? "LLM fallback"
     : email.classificationProvider === "spacy"
       ? "NLP comparison"
