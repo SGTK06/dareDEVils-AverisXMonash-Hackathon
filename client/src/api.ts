@@ -201,6 +201,34 @@ async function processEmail(
 ): Promise<EmailRecord> {
   const record = existing ?? summary(raw);
   if (record.category !== "Comparison request") return record;
+  // The backend owns document extraction and comparison so the UI uses the
+  // same pipeline as the notebook, including PDF/DOCX/XLSX attachments.
+  try {
+    const comparison = await request<{
+      status: "OK" | "MISMATCH" | "NEEDS_REVIEW";
+      review_reason?: string | null;
+      fields?: Array<{ field: string; si: string; bl: string; result: "match" | "mismatch" | "review"; confidence: number; evidence: string }>;
+    }>(`/comparisons/${encodeURIComponent(raw.email_id)}`);
+    const fields = (comparison.fields ?? []).map((field) => ({
+      ...field,
+      field: field.field.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+    }));
+    const mismatches = fields.filter((field) => field.result === "mismatch");
+    const review = fields.filter((field) => field.result === "review");
+    return {
+      ...record,
+      fields,
+      status: comparison.status === "MISMATCH" ? "Mismatch" : comparison.status === "OK" ? "Match" : "Needs review",
+      result: comparison.status === "MISMATCH"
+        ? `${mismatches.length} field${mismatches.length === 1 ? "" : "s"} differ`
+        : comparison.status === "OK" ? "No mismatch detected" : `${review.length || 1} field${review.length === 1 ? "" : "s"} need review`,
+      reason: comparison.review_reason ?? undefined,
+      missingAttachment: comparison.review_reason === "missing_attachment",
+    };
+  } catch {
+    // Keep the existing local fallback for local development when the backend
+    // comparison service is unavailable.
+  }
   if (raw.attachments.length < 2)
     return {
       ...record,
@@ -296,6 +324,9 @@ export const api = {
   async runClassificationTest() {
     return request<ClassificationTestResult>("/tests/classification", { method: "POST" });
   },
+  async runComparisonTest() {
+    return request<ComparisonTestResult>("/tests/comparison", { method: "POST" });
+  },
   async listEmails() {
     const raw = await request<RawEmail[]>("/emails");
     const records = raw.map(summary);
@@ -363,11 +394,7 @@ export const api = {
     return toSubmission(merged);
   },
   async submit(submission: Submission) {
-    return request<{
-      score?: number;
-      final_score?: number;
-      [key: string]: unknown;
-    }>("/submit", {
+    return request<EndToEndScore>("/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission)
@@ -397,4 +424,33 @@ export type ClassificationTestResult = {
   per_category: Record<string, { support: number; precision: number; recall: number; f1: number }>;
   macro: { precision: number; recall: number; f1: number };
   results: Array<{ email_id: string; subject: string; actual: string; predicted: string; confidence: number; provider: string; check_required: boolean; review_reason?: string; correct: boolean }>;
+};
+
+export type ComparisonTestResult = {
+  total: number;
+  comparable_total: number;
+  pair_total: number;
+  not_comparable_total: number;
+  review_total: number;
+  status_confusion_matrix: Record<string, Record<string, number>>;
+  field_metrics: Record<string, { support: number; precision: number; recall: number; f1: number; exact_accuracy: number }>;
+  macro_field: { precision: number; recall: number; f1: number; exact_accuracy: number };
+  exact_defect_field_accuracy: number;
+  pair_exact_defect_field_accuracy: number;
+  review_precision: number;
+  review_recall: number;
+  review_f1: number;
+  review_reasons: Record<string, { total: number; caught: number }>;
+  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; actual_fields: string[]; predicted_fields: string[]; review_reason?: string | null; has_attachment_pair: boolean; correct: boolean }>;
+};
+
+export type EndToEndScore = {
+  score?: number;
+  final_score: number;
+  n_emails: number;
+  weights: Record<string, number>;
+  stage1: { accuracy: number; macro_f1: number; rule_pct: number | null };
+  stage3: { defect_precision: number; defect_recall: number; defect_f1: number; field_f1: number; exact_match_rate: number; doc_total: number };
+  reliability: { escalation_precision: number; escalation_recall: number; escalation_f1: number; gold_review: number; pred_review: number };
+  end_to_end: { success: number; total: number; rate: number };
 };

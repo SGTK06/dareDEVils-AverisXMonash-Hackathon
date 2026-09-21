@@ -40,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from classification import MailClassifier
+from comparison_service import compare_email
 from persistence import save_classification, save_classifications_batch, get_classifications_batch, save_comparison, get_comparisons_batch, save_pipeline_run, get_recent_runs
 
 import scoring
@@ -147,6 +148,97 @@ def run_classification_test():
         pass  # DB persistence is best-effort
     return result_payload
 
+
+@app.post("/tests/comparison")
+def run_comparison_test():
+    """Evaluate the comparison pipeline against the v2 ground truth."""
+    truth = _load_ground_truth()
+    comparison_ids = [eid for eid, item in truth.items() if item.get("category") == "BL_COMPARISON"]
+    results = []
+    status_labels = ["OK", "MISMATCH", "NEEDS_REVIEW"]
+    matrix = {actual: {predicted: 0 for predicted in status_labels} for actual in status_labels}
+    field_labels = ["shipper", "consignee", "notify_party", "port_of_loading", "port_of_discharge", "container_count", "gross_weight_kg"]
+    field_stats = {field: {"tp": 0, "fp": 0, "fn": 0, "exact": 0, "total": 0} for field in field_labels}
+    review_reasons = {reason: {"total": 0, "caught": 0} for reason in ["wrong_doc_type", "missing_attachment", "unreadable", "missing_value"]}
+    for email_id in comparison_ids:
+        gold = truth[email_id]
+        prediction = compare_email(email_id, DATA_DIR)
+        actual_status = gold.get("status", "OK")
+        predicted_status = prediction.get("status", "NEEDS_REVIEW")
+        has_pair = len(get_email(email_id).get("attachments") or []) >= 2
+        if has_pair:
+            matrix[actual_status][predicted_status] += 1
+        gold_fields = set(gold.get("defect_fields", []))
+        predicted_fields = set(prediction.get("defect_fields", []))
+        comparable = has_pair and actual_status in {"OK", "MISMATCH"}
+        if comparable:
+            for field in field_labels:
+                gold_bad, predicted_bad = field in gold_fields, field in predicted_fields
+                field_stats[field]["total"] += 1
+                field_stats[field]["exact"] += int(gold_bad == predicted_bad)
+                field_stats[field]["tp"] += int(gold_bad and predicted_bad)
+                field_stats[field]["fp"] += int(not gold_bad and predicted_bad)
+                field_stats[field]["fn"] += int(gold_bad and not predicted_bad)
+        reason = gold.get("review_reason")
+        if actual_status == "NEEDS_REVIEW" and reason in review_reasons:
+            review_reasons[reason]["total"] += 1
+            review_reasons[reason]["caught"] += int(predicted_status == "NEEDS_REVIEW")
+        results.append({
+            "email_id": email_id,
+            "subject": get_email(email_id).get("subject", ""),
+            "actual": actual_status,
+            "predicted": predicted_status,
+            "actual_fields": sorted(gold_fields),
+            "predicted_fields": sorted(predicted_fields),
+            "review_reason": prediction.get("review_reason"),
+            "has_attachment_pair": has_pair,
+            "correct": actual_status == predicted_status and gold_fields == predicted_fields,
+        })
+
+    def prf(stats):
+        precision = stats["tp"] / (stats["tp"] + stats["fp"]) if stats["tp"] + stats["fp"] else 0
+        recall = stats["tp"] / (stats["tp"] + stats["fn"]) if stats["tp"] + stats["fn"] else 0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+        return {"precision": precision, "recall": recall, "f1": f1, "support": stats["tp"] + stats["fn"], "exact_accuracy": stats["exact"] / stats["total"] if stats["total"] else 0}
+
+    comparable_count = 0
+    pair_count = 0
+    pair_exact = 0
+    for eid, item in truth.items():
+        if item.get("category") != "BL_COMPARISON":
+            continue
+        email = get_email(eid)
+        has_pair = len(email.get("attachments") or []) >= 2
+        if has_pair:
+            pair_count += 1
+        if has_pair and item.get("status") != "NEEDS_REVIEW":
+            comparable_count += 1
+            if has_pair:
+                prediction = next((row for row in results if row["email_id"] == eid), None)
+                if prediction and set(prediction["actual_fields"]) == set(prediction["predicted_fields"]):
+                    pair_exact += 1
+    review_total = sum(item["total"] for item in review_reasons.values())
+    review_caught = sum(item["caught"] for item in review_reasons.values())
+    predicted_review = sum(item["predicted"] == "NEEDS_REVIEW" for item in results)
+    review_precision = review_caught / predicted_review if predicted_review else 0
+    review_recall = review_caught / review_total if review_total else 0
+    return {
+        "total": len(results), "comparable_total": comparable_count, "pair_total": pair_count,
+        "not_comparable_total": len(results) - pair_count, "review_total": review_total,
+        "status_confusion_matrix": matrix,
+        "field_metrics": {field: prf(stats) for field, stats in field_stats.items()},
+        "macro_field": {key: sum(metrics[key] for metrics in {field: prf(stats) for field, stats in field_stats.items()}.values()) / len(field_labels) for key in ("precision", "recall", "f1", "exact_accuracy")},
+        "exact_defect_field_accuracy": sum(
+            set(item["actual_fields"]) == set(item["predicted_fields"])
+            for item in results
+            if item.get("has_attachment_pair") and truth[item["email_id"]].get("status") != "NEEDS_REVIEW"
+        ) / comparable_count if comparable_count else 0,
+        "pair_exact_defect_field_accuracy": pair_exact / pair_count if pair_count else 0,
+        "review_precision": review_precision, "review_recall": review_recall,
+        "review_f1": 2 * review_precision * review_recall / (review_precision + review_recall) if review_precision + review_recall else 0,
+        "review_reasons": review_reasons, "results": results,
+    }
+
 @app.patch("/classifications/{email_id}")
 def correct_classification(email_id: str, correction: Correction):
     get_email(email_id)
@@ -160,6 +252,12 @@ def correct_classification(email_id: str, correction: Correction):
 # --------------------------------------------------------------------------
 # comparison persistence
 # --------------------------------------------------------------------------
+@app.get("/comparisons/{email_id}")
+def run_comparison(email_id: str):
+    get_email(email_id)
+    return compare_email(email_id, DATA_DIR)
+
+
 @app.post("/comparisons/{email_id}")
 def persist_comparison(email_id: str, request_body: dict):
     """Save a comparison result for an email."""

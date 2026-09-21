@@ -35,7 +35,9 @@ import {
   type EmailRecord,
   type EmailStatus,
   type FieldResult,
-  type ClassificationTestResult
+  type ClassificationTestResult,
+  type ComparisonTestResult
+  ,type EndToEndScore
 } from "./api.ts";
 
 type View = "inbox" | "review" | "runs" | "test" | "export";
@@ -1174,6 +1176,7 @@ function ReviewView({
 }
 
 function TestView({ onNotify }: { onNotify: (message: string) => void }) {
+  const [mode, setMode] = useState<"classification" | "comparison" | "end-to-end">("classification");
   const [run, setRun] = useState<ClassificationTestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [selected, setSelected] = useState<
@@ -1197,6 +1200,12 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
     "GENERAL",
     "SPAM"
   ];
+  if (mode === "end-to-end") {
+    return <EndToEndTestView onNotify={onNotify} onBack={() => setMode("classification")} onComparison={() => setMode("comparison")} />;
+  }
+  if (mode === "comparison") {
+    return <ComparisonTestView onNotify={onNotify} onBack={() => setMode("classification")} onEndToEnd={() => setMode("end-to-end")} />;
+  }
   return (
     <section className="page-wrap">
       <div className="page-heading">
@@ -1215,6 +1224,11 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
           <RefreshCw size={15} />{" "}
           {running ? "Running 520 emails..." : "Run classification test"}
         </button>
+      </div>
+      <div className="view-tabs" role="tablist" aria-label="Pipeline tests">
+        <button className="button button-secondary" role="tab" aria-selected="true">Classification</button>
+        <button className="button button-secondary" role="tab" onClick={() => setMode("comparison")}>Comparison</button>
+        <button className="button button-secondary" role="tab" onClick={() => setMode("end-to-end")}>End to end</button>
       </div>
       {!run ? (
         <div className="empty-state">
@@ -1383,6 +1397,70 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
       )}
     </section>
   );
+}
+
+function ComparisonTestView({ onNotify, onBack, onEndToEnd }: { onNotify: (message: string) => void; onBack: () => void; onEndToEnd: () => void }) {
+  const [run, setRun] = useState<ComparisonTestResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [selected, setSelected] = useState<ComparisonTestResult["results"][number] | null>(null);
+  const execute = async () => {
+    setRunning(true);
+    try { setRun(await api.runComparisonTest()); onNotify("Comparison test completed"); }
+    catch (error) { onNotify(error instanceof Error ? error.message : "Test failed"); }
+    finally { setRunning(false); }
+  };
+  const statuses = ["OK", "MISMATCH", "NEEDS_REVIEW"];
+  const label = (value: string) => value.replaceAll("_", " ");
+  return <section className="page-wrap">
+    <div className="page-heading">
+      <div><h1>Pipeline test</h1><p>Re-run document comparison across the 200 comparison requests in the v2 dataset.</p></div>
+      <button className="button button-primary" onClick={execute} disabled={running}><RefreshCw size={15} /> {running ? "Running comparisons..." : "Run comparison test"}</button>
+    </div>
+    <div className="view-tabs" role="tablist" aria-label="Pipeline tests">
+      <button className="button button-secondary" onClick={onBack}>Classification</button>
+      <button className="button button-secondary" role="tab" aria-selected="true">Comparison</button>
+      <button className="button button-secondary" onClick={onEndToEnd}>End to end</button>
+    </div>
+    <p className="reason-copy"><strong>Reading comparison outcomes:</strong> <b>No defect</b> means an SI/BL pair was compared and no field differed. <b>Not comparable</b> means the request has no usable SI/BL pair and is correctly routed to review while documents are awaited.</p>
+    {!run ? <div className="empty-state"><Activity size={24} /><strong>No comparison test run yet</strong><span>Run the comparison pipeline to inspect defect detection and review escalation.</span></div> : <>
+      <div className="stats-strip">
+        <div className="stat"><span>SI / BL pairs</span><strong>{run.pair_total}</strong><small>{run.not_comparable_total} requests awaiting documents</small></div>
+        <div className="stat"><span>Exact defect fields</span><strong>{(run.pair_exact_defect_field_accuracy * 100).toFixed(1)}%</strong><small>pair records only</small></div>
+        <div className="stat"><span>Field F1</span><strong>{(run.macro_field.f1 * 100).toFixed(1)}%</strong><small>macro across seven fields</small></div>
+        <div className="stat"><span>Review recall</span><strong>{(run.review_recall * 100).toFixed(1)}%</strong><small>uncertain cases escalated</small></div>
+        <div className="stat"><span>Review precision</span><strong>{(run.review_precision * 100).toFixed(1)}%</strong><small>escalations that needed review</small></div>
+      </div>
+      <div className="test-grid">
+        <div><div className="panel-heading"><div><span className="eyebrow">COMPARABLE PAIRS ONLY</span><h2>Expected outcome versus pipeline outcome</h2></div></div><div className="matrix-wrap"><table className="test-matrix"><thead><tr><th>Expected \ Predicted</th>{statuses.map(s => <th key={s}>{label(s)}</th>)}</tr></thead><tbody>{statuses.map(actual => <tr key={actual}><th>{label(actual)}</th>{statuses.map(predicted => <td className={actual === predicted ? "matrix-correct" : ""} key={predicted}>{run.status_confusion_matrix[actual]?.[predicted] ?? 0}</td>)}</tr>)}</tbody></table></div></div>
+        <div className="score-panel"><span className="eyebrow">FIELD QUALITY</span>{Object.entries(run.field_metrics).map(([field, metric]) => <div className="test-metric" key={field}><strong>{label(field)}</strong><span>P {(metric.precision * 100).toFixed(1)}% · R {(metric.recall * 100).toFixed(1)}% · F1 {(metric.f1 * 100).toFixed(1)}%</span><small>{metric.support} defective examples</small></div>)}</div>
+      </div>
+      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Comparable pair issues</h2><p>Requests without an SI and BL pair are tracked separately as awaiting documents.</p></div></div><div className="test-result-head"><span>Email</span><span>Ground truth</span><span>Predicted</span><span>Fields</span><span /></div>{run.results.filter(item => !item.correct && item.has_attachment_pair).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{item.predicted_fields.length ? item.predicted_fields.map(label).join(", ") : item.review_reason ?? "—"}</span><ChevronRight size={15} /></button>)}{run.results.filter(item => item.has_attachment_pair && !item.correct).length === 0 && <div className="empty-state"><CheckCircle2 size={22} /><strong>No comparable-pair errors</strong></div>}</div>
+      {selected && <div className="test-detail"><button className="icon-button" onClick={() => setSelected(null)}><X size={16} /></button><span className="eyebrow">COMPARISON DETAIL</span><h2>{selected.email_id}</h2><p>{selected.subject}</p><div className="test-detail-values"><span>Ground truth<strong>{selected.actual}</strong></span><span>Predicted<strong>{selected.predicted}</strong></span><span>Expected fields<strong>{selected.actual_fields.map(label).join(", ") || "None"}</strong></span><span>Predicted fields<strong>{selected.predicted_fields.map(label).join(", ") || "None"}</strong></span></div>{selected.review_reason && <p className="reason-copy">Review reason: {selected.review_reason}</p>}</div>}
+    </>}
+  </section>;
+}
+
+function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (message: string) => void; onBack: () => void; onComparison: () => void }) {
+  const [score, setScore] = useState<EndToEndScore | null>(null);
+  const [running, setRunning] = useState(false);
+  const execute = async () => {
+    setRunning(true);
+    try {
+      const submission = await api.buildSubmission();
+      setScore(await api.submit(submission));
+      onNotify("End-to-end score completed");
+    } catch (error) { onNotify(error instanceof Error ? error.message : "Scoring failed"); }
+    finally { setRunning(false); }
+  };
+  return <section className="page-wrap">
+    <div className="page-heading"><div><h1>Pipeline test</h1><p>Score the current classification and comparison output against the private v2 ground truth.</p></div><button className="button button-primary" onClick={execute} disabled={running}><RefreshCw size={15} /> {running ? "Building and scoring..." : "Run end-to-end score"}</button></div>
+    <div className="view-tabs" role="tablist" aria-label="Pipeline tests"><button className="button button-secondary" onClick={onBack}>Classification</button><button className="button button-secondary" onClick={onComparison}>Comparison</button><span className="button button-secondary" aria-selected="true">End to end</span></div>
+    {!score ? <div className="empty-state"><Activity size={24} /><strong>No end-to-end score yet</strong><span>Run the complete submission through the existing scoring endpoint.</span></div> : <>
+      <div className="stats-strip"><div className="stat"><span>Total score</span><strong>{(score.final_score * 100).toFixed(1)}%</strong><small>weighted leaderboard score</small></div><div className="stat"><span>Stage 1 macro F1</span><strong>{(score.stage1.macro_f1 * 100).toFixed(1)}%</strong><small>classification quality</small></div><div className="stat"><span>Comparison F1</span><strong>{(score.stage3.defect_f1 * 100).toFixed(1)}%</strong><small>defect detection</small></div><div className="stat"><span>End-to-end catch</span><strong>{(score.end_to_end.rate * 100).toFixed(1)}%</strong><small>{score.end_to_end.success} / {score.end_to_end.total} exact defects</small></div><div className="stat"><span>Review recall</span><strong>{(score.reliability.escalation_recall * 100).toFixed(1)}%</strong><small>reliability axis</small></div></div>
+      <div className="test-grid"><div className="score-panel"><span className="eyebrow">SCORE COMPONENTS</span><div className="test-metric"><strong>Classification</strong><span>Macro F1 {(score.stage1.macro_f1 * 100).toFixed(1)}% · accuracy {(score.stage1.accuracy * 100).toFixed(1)}%</span><small>Weight {(score.weights.stage1 * 100).toFixed(0)}%</small></div><div className="test-metric"><strong>Comparison</strong><span>Defect F1 {(score.stage3.defect_f1 * 100).toFixed(1)}% · field F1 {(score.stage3.field_f1 * 100).toFixed(1)}%</span><small>Weight {(score.weights.stage3 * 100).toFixed(0)}%</small></div><div className="test-metric"><strong>Exact defect capture</strong><span>{score.end_to_end.success} of {score.end_to_end.total} successful</span><small>Weight {(score.weights.end_to_end * 100).toFixed(0)}%</small></div></div><div className="score-panel"><span className="eyebrow">RELIABILITY</span><div className="test-metric"><strong>Escalation precision</strong><span>{(score.reliability.escalation_precision * 100).toFixed(1)}%</span><small>{score.reliability.pred_review} cases escalated</small></div><div className="test-metric"><strong>Escalation recall</strong><span>{(score.reliability.escalation_recall * 100).toFixed(1)}%</span><small>{score.reliability.gold_review} cases required review</small></div><div className="test-metric"><strong>Escalation F1</strong><span>{(score.reliability.escalation_f1 * 100).toFixed(1)}%</span><small>precision and recall combined</small></div></div></div>
+      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">SCORING CONTRACT</span><h2>How this score is calculated</h2></div></div><p className="reason-copy">The score comes directly from <code>POST /submit</code>. It combines classification macro F1, comparable-document defect F1, and exact end-to-end defect capture using the server’s configured weights.</p></div>
+    </>}
+  </section>;
 }
 
 function RunsView({
