@@ -144,8 +144,8 @@ def run_classification_test():
             email_count=total,
         )
         result_payload["run_id"] = run_id
-    except Exception:
-        pass  # DB persistence is best-effort
+    except Exception as e:
+        print("save_pipeline_run classification_test error:", repr(e))
     return result_payload
 
 
@@ -222,7 +222,7 @@ def run_comparison_test():
     predicted_review = sum(item["predicted"] == "NEEDS_REVIEW" for item in results)
     review_precision = review_caught / predicted_review if predicted_review else 0
     review_recall = review_caught / review_total if review_total else 0
-    return {
+    result_payload = {
         "total": len(results), "comparable_total": comparable_count, "pair_total": pair_count,
         "not_comparable_total": len(results) - pair_count, "review_total": review_total,
         "status_confusion_matrix": matrix,
@@ -238,6 +238,18 @@ def run_comparison_test():
         "review_f1": 2 * review_precision * review_recall / (review_precision + review_recall) if review_precision + review_recall else 0,
         "review_reasons": review_reasons, "results": results,
     }
+    try:
+        run_id = save_pipeline_run(
+            run_type="full_pipeline",
+            config={},
+            results=result_payload,
+            score=result_payload.get("pair_exact_defect_field_accuracy"),
+            email_count=len(results),
+        )
+        result_payload["run_id"] = run_id
+    except Exception as e:
+        print("save_pipeline_run full_pipeline error:", repr(e))
+    return result_payload
 
 @app.patch("/classifications/{email_id}")
 def correct_classification(email_id: str, correction: Correction):
@@ -252,9 +264,40 @@ def correct_classification(email_id: str, correction: Correction):
 # --------------------------------------------------------------------------
 # comparison persistence
 # --------------------------------------------------------------------------
+@app.get("/comparisons/batch")
+def get_comparisons_batch_endpoint(ids: str):
+    """Fetch cached comparisons for a batch of emails."""
+    email_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
+    cached = get_comparisons_batch(email_ids)
+    
+    # Clean up fields JSON serialization for the frontend
+    for row in cached.values():
+        if isinstance(row.get("fields"), str):
+            try:
+                row["fields"] = json.loads(row["fields"])
+            except Exception:
+                row["fields"] = []
+                
+    return cached
+
+
 @app.get("/comparisons/{email_id}")
 def run_comparison(email_id: str):
     get_email(email_id)
+    cached = get_comparisons_batch([email_id])
+    if email_id in cached:
+        row = cached[email_id]
+        fields = row.get("fields", [])
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except Exception:
+                fields = []
+        return {
+            "status": row.get("status", "NEEDS_REVIEW"),
+            "review_reason": row.get("reason"),
+            "fields": fields
+        }
     return compare_email(email_id, DATA_DIR)
 
 
@@ -374,6 +417,17 @@ async def submit(request: Request):
         raise HTTPException(400, "submission must be a JSON object keyed by email_id")
     truth = _load_ground_truth()
     result = scoring.score_all(truth, sub)
+    try:
+        run_id = save_pipeline_run(
+            run_type="submission",
+            config={},
+            results=result,
+            score=result.get("final_score"),
+            email_count=len(sub),
+        )
+        result["run_id"] = run_id
+    except Exception as e:
+        print("save_pipeline_run submission error:", repr(e))
     return JSONResponse(result)
 
 

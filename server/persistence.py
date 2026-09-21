@@ -181,6 +181,7 @@ def save_pipeline_run(
         rows = response.json()
         if rows and isinstance(rows, list):
             return rows[0].get("id")
+    print(f"save_pipeline_run failed: {response.status_code} {response.text}")
     return None
 
 

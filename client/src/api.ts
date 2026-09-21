@@ -330,8 +330,12 @@ export const api = {
   async listEmails() {
     const raw = await request<RawEmail[]>("/emails");
     const records = raw.map(summary);
-    const classifications = await request<{ results: Array<{ email_id: string; category: string; confidence: number; check_required: boolean; review_reason?: string }> }>("/classifications/run", { method: "POST" });
+    const classifications = await request<{ results: Array<{ email_id: string; category: string; confidence: number; check_required: boolean; review_reason?: string; status?: string }> }>("/classifications/run", { method: "POST" });
     const byId = new Map(classifications.results.map((item) => [item.email_id, item]));
+    
+    const comparisonIds = classifications.results.filter(c => c.category === "BL_COMPARISON").map(c => c.email_id).join(",");
+    const comparisons = comparisonIds ? await request<Record<string, { status: string; reason: string; result_text: string }>>(`/comparisons/batch?ids=${comparisonIds}`).catch(() => ({})) : {};
+
     records.forEach((record) => {
       const classification = byId.get(record.id);
       if (!classification) return;
@@ -339,7 +343,21 @@ export const api = {
       record.category = categoryMap[classification.category] ?? "General";
       record.categoryConfidence = classification.confidence;
       record.checkRequired = classification.check_required;
-      if (classification.check_required) { record.status = "Needs review"; record.reason = classification.review_reason ?? "Low classification confidence"; }
+      
+      if (classification.status === "RESOLVED") {
+          record.status = "Classified";
+          record.result = "Review resolved";
+      } else if (classification.check_required) { 
+          record.status = "Needs review"; 
+          record.reason = classification.review_reason ?? "Low classification confidence"; 
+      }
+      
+      const comp = comparisons[record.id];
+      if (comp && record.category === "Comparison request") {
+          record.status = comp.status === "OK" ? "Match" : comp.status === "MISMATCH" ? "Mismatch" : "Needs review";
+          record.result = comp.result_text ?? record.result;
+          record.reason = comp.reason ?? record.reason;
+      }
     });
     records.forEach((record) => cache.set(record.id, record));
     return records;
@@ -375,6 +393,16 @@ export const api = {
         status: "Match",
         result: "Review resolved"
       });
+    await request(`/comparisons/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status: "OK",
+        result_text: "Review resolved",
+        reason: null,
+        fields: existing?.fields ?? []
+      })
+    }).catch(() => {});
     return cache.get(id) ?? this.getEmail(id);
   },
   async buildSubmission() {

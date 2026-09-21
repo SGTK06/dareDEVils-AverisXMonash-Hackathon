@@ -40,6 +40,8 @@ import {
   ,type EndToEndScore
 } from "./api.ts";
 
+import { loadPreferences, savePreferencesDebounced } from "./lib/supabaseHelpers";
+
 type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
@@ -56,11 +58,11 @@ const statusMeta: Record<EmailStatus, { label: string; className: string }> = {
   Classified: { label: "Classified", className: "status-neutral" }
 };
 
-function Dashboard({ userEmail, onSignOut }: DashboardProps) {
+function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   const [view, setView] = useState<View>("inbox");
   const [selected, setSelected] = useState<EmailRecord | null>(null);
   const [query, setQuery] = useState("");
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => localStorage.getItem("theme") === "dark");
   const [filter, setFilter] = useState<EmailStatus | "All">("All");
   const [toast, setToast] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -68,9 +70,30 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  useEffect(() => {
+    loadPreferences(userId).then(prefs => {
+      setDark(prefs.theme === "dark");
+      setView((prefs.last_view as View) || "inbox");
+      if (prefs.filters && typeof prefs.filters.status === "string") {
+         setFilter(prefs.filters.status as any);
+      }
+      setPrefsLoaded(true);
+    });
+  }, [userId]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
+    localStorage.setItem("theme", dark ? "dark" : "light");
+    
+    if (prefsLoaded) {
+      savePreferencesDebounced(userId, {
+        theme: dark ? "dark" : "light",
+        last_view: view,
+        filters: { status: filter }
+      });
+    }
     const handler = (event: KeyboardEvent) => {
       if (event.key === "/" && document.activeElement?.tagName !== "INPUT") {
         event.preventDefault();
@@ -85,7 +108,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [dark]);
+  }, [dark, view, filter, prefsLoaded, userId]);
 
   useEffect(() => {
     api
@@ -362,7 +385,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
           <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} />
         )}
         {!loading && !loadError && view === "runs" && (
-          <RunsView emails={emails} onNotify={notify} />
+          <RunsView onNotify={notify} />
         )}
         {!loading && !loadError && view === "test" && (
           <TestView onNotify={notify} />
@@ -1187,6 +1210,15 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
   const [selected, setSelected] = useState<
     ClassificationTestResult["results"][number] | null
   >(null);
+
+  useEffect(() => {
+    api.getRuns("classification_test", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        setRun(runs[0].results as ClassificationTestResult);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try {
@@ -1408,6 +1440,15 @@ function ComparisonTestView({ onNotify, onBack, onEndToEnd }: { onNotify: (messa
   const [run, setRun] = useState<ComparisonTestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [selected, setSelected] = useState<ComparisonTestResult["results"][number] | null>(null);
+
+  useEffect(() => {
+    api.getRuns("full_pipeline", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        setRun(runs[0].results as ComparisonTestResult);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try { setRun(await api.runComparisonTest()); onNotify("Comparison test completed"); }
@@ -1448,6 +1489,16 @@ function ComparisonTestView({ onNotify, onBack, onEndToEnd }: { onNotify: (messa
 function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (message: string) => void; onBack: () => void; onComparison: () => void }) {
   const [score, setScore] = useState<EndToEndScore | null>(null);
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    api.getRuns("submission", 1).then(runs => {
+      if (runs && runs.length > 0 && runs[0].results) {
+        const res = runs[0].results as any;
+        setScore(res.final_score !== undefined ? res : null);
+      }
+    }).catch(() => {});
+  }, []);
+
   const execute = async () => {
     setRunning(true);
     try {
@@ -1469,79 +1520,71 @@ function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (messa
 }
 
 function RunsView({
-  emails,
   onNotify
 }: {
-  emails: EmailRecord[];
   onNotify: (message: string) => void;
 }) {
-  const failed = emails.filter((email) => email.status === "Failed").length;
-  const comparisons = emails.filter(
-    (email) => email.category === "Comparison request"
-  ).length;
+  const [runs, setRuns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.getRuns().then(data => {
+      setRuns(data);
+      setLoading(false);
+    }).catch(err => {
+      onNotify("Failed to fetch runs");
+      setLoading(false);
+    });
+  }, [onNotify]);
+
+  const formatDate = (ds: string) => new Date(ds).toLocaleString();
+
   return (
     <section className="page-wrap">
       <div className="page-heading">
         <div>
-          <h1>Run status</h1>
-          <p>Processing history across the current inbox.</p>
+          <h1>Pipeline Runs</h1>
+          <p>History of pipeline test and submission runs from the database.</p>
         </div>
         <button
           className="button button-primary"
-          onClick={() => onNotify("Retrying all failed items")}
+          onClick={() => {
+            setLoading(true);
+            api.getRuns().then(data => {
+              setRuns(data);
+              setLoading(false);
+              onNotify("Refreshed runs");
+            });
+          }}
         >
-          <RefreshCw size={15} /> Retry all failed
+          <RefreshCw size={15} /> Refresh
         </button>
       </div>
-      <div className="run-overview">
-        <div>
-          <span className="eyebrow">CURRENT RUN</span>
-          <strong>Inbox sync · live source</strong>
-          <span>{emails.length} emails · Loaded from verification service</span>
-        </div>
-        <span className="run-pill">
-          <span className="health-dot" />
-          {emails.length - failed} complete · {failed} failed
-        </span>
-      </div>
+      
       <div className="run-table">
-        <div className="run-head">
-          <span>Step</span>
-          <span>Completed</span>
-          <span>Failed</span>
-          <span>Avg. duration</span>
+        <div className="run-head" style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
+          <span>Run Type</span>
+          <span>Started At</span>
           <span>Status</span>
+          <span>Emails</span>
+          <span>Score</span>
         </div>
-        {[
-          ["Ingest", emails.length.toString(), "0", "—", "Complete"],
-          ["Classify", emails.length.toString(), "0", "—", "Complete"],
-          [
-            "Extract",
-            (emails.length - failed).toString(),
-            failed.toString(),
-            "On demand",
-            failed ? `${failed} failed` : "Complete"
-          ],
-          ["Compare", comparisons.toString(), "0", "On demand", "Complete"],
-          ["Export", "—", "—", "—", "Waiting"]
-        ].map((row) => (
-          <div className="run-row" key={row[0]}>
-            <strong>{row[0]}</strong>
-            <span>{row[1]}</span>
-            <span className={row[2] === "1" ? "result-alert" : ""}>
-              {row[2]}
+        {loading ? <div style={{ padding: "24px", textAlign: "center" }}>Loading runs...</div> : runs.length === 0 ? <div style={{ padding: "24px", textAlign: "center" }}>No runs found in database.</div> : runs.map((run) => (
+          <div className="run-row" key={run.id} style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
+            <strong>{run.run_type}</strong>
+            <span>{formatDate(run.started_at)}</span>
+            <span className="status-cell">
+              {run.status === "success" ? (
+                <CheckCircle2 className="icon-success" size={16} />
+              ) : run.status === "failed" ? (
+                <XCircle className="icon-error" size={16} />
+              ) : (
+                <Clock3 className="icon-neutral" size={16} />
+              )}
+              {run.status}
             </span>
-            <span className="mono">{row[3]}</span>
-            <span
-              className={
-                row[4] === "1 failed"
-                  ? "status status-failed"
-                  : "status status-neutral"
-              }
-            >
-              <span className="status-dot" />
-              {row[4]}
-            </span>
+            <span className="mono">{run.email_count ?? "—"}</span>
+            <strong className={run.score !== null ? "" : "status-neutral"}>{run.score !== null ? (run.score * 100).toFixed(1) + "%" : "—"}</strong>
           </div>
         ))}
       </div>
