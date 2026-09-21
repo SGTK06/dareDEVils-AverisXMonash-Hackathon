@@ -5,16 +5,15 @@ WORKDIR /app
 # deps first for layer caching.
 # --trusted-host lets the build succeed behind corporate proxies that inject a
 # self-signed cert into the TLS chain (harmless on normal networks).
-COPY requirements.txt .
+COPY server/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \
     -r requirements.txt
-RUN python -m spacy download en_core_web_md
-
 # app code (data + ground truth come in as mounts, not baked into the image)
-COPY scoring.py app.py score_cli.py persistence.py ./
-COPY classification ./classification
+COPY server/scoring.py server/app.py server/score_cli.py server/persistence.py ./
+COPY server/classification ./classification
+COPY models ./models
 
 EXPOSE 8000
 

@@ -9,7 +9,9 @@
 # To let judges pull labels over HTTP, set REVEAL_GT=1 and a JUDGE_TOKEN.
 services:
   inbox:
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     ports:
       # host 8080 -> container 8000 (8000 often taken locally; change freely)
       - "8080:8000"
