@@ -23,6 +23,7 @@ Environment
     GROUND_TRUTH   default /secrets/ground_truth.json   (private mount)
     REVEAL_GT      "1" to enable /ground_truth (default off)
     JUDGE_TOKEN    if set, /ground_truth requires header X-Judge-Token: <token>
+    CORS_ORIGINS   comma-separated allowed browser origins (default: *)
 """
 import json
 import os
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from classification import MailClassifier
@@ -44,10 +46,22 @@ GROUND_TRUTH_PATH = Path(os.environ.get("GROUND_TRUTH", "/secrets/ground_truth.j
 SAMPLE_PATH = DATA_DIR / "sample_submission.json"
 REVEAL_GT = os.environ.get("REVEAL_GT", "0") == "1"
 JUDGE_TOKEN = os.environ.get("JUDGE_TOKEN")
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 
 app = FastAPI(title="SDOC Hackathon Inbox", version="2.0",
               description="Serves the shipping-docs inbox and scores submissions. "
               "Ground truth is held privately and never served.")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["*"]
+)
 classifier = MailClassifier()
 TEST_CATEGORIES = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"]
 
