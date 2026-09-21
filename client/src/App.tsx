@@ -36,7 +36,7 @@ function App() {
     return <AuthPage />;
   }
 
-  return <Dashboard userEmail={user.email ?? ""} onSignOut={signOut} />;
+  return <Dashboard userEmail={user.email ?? ""} userId={user.id} onSignOut={signOut} />;
 }
 
 export default App;
