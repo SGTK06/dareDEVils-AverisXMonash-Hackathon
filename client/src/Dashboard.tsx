@@ -44,6 +44,7 @@ type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
+  userId: string;
   onSignOut: () => void;
 };
 
