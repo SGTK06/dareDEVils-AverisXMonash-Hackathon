@@ -78,7 +78,13 @@ const endpoint = (path: string) => `${apiBase}${path}`;
 const cache = new Map<string, EmailRecord>();
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(endpoint(path), options);
+  const response = await fetch(endpoint(path), {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new Error(detail || `Request failed (${response.status})`);
@@ -211,22 +217,33 @@ async function processEmail(
     const fields = extractFields(siText, blText);
     const needsReview = fields.some((field) => field.result === "review");
     const mismatches = fields.filter((field) => field.result === "mismatch");
+    const status: EmailStatus = needsReview
+      ? "Needs review"
+      : mismatches.length
+        ? "Mismatch"
+        : "Match";
+    const resultText = needsReview
+      ? `${fields.filter((field) => field.result === "review").length} fields need review`
+      : mismatches.length
+        ? `${mismatches.length} field${mismatches.length > 1 ? "s" : ""} differ`
+        : "No mismatch detected";
+    const reason = needsReview
+      ? "Required value is missing or unreadable"
+      : undefined;
+    // Persist comparison result to database (best-effort)
+    try {
+      await request(`/comparisons/${encodeURIComponent(raw.email_id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields, status, result_text: resultText, reason }),
+      });
+    } catch { /* persistence is best-effort */ }
     return {
       ...record,
       fields,
-      status: needsReview
-        ? "Needs review"
-        : mismatches.length
-          ? "Mismatch"
-          : "Match",
-      result: needsReview
-        ? `${fields.filter((field) => field.result === "review").length} fields need review`
-        : mismatches.length
-          ? `${mismatches.length} field${mismatches.length > 1 ? "s" : ""} differ`
-          : "No mismatch detected",
-      reason: needsReview
-        ? "Required value is missing or unreadable"
-        : undefined
+      status,
+      result: resultText,
+      reason,
     };
   } catch (error) {
     return {
@@ -355,6 +372,22 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission)
     });
+  },
+  async getRuns(runType?: string, limit = 20) {
+    const params = new URLSearchParams();
+    if (runType) params.set("run_type", runType);
+    params.set("limit", String(limit));
+    return request<Array<{
+      id: string;
+      run_type: string;
+      status: string;
+      config: Record<string, unknown>;
+      results: Record<string, unknown> | null;
+      score: number | null;
+      email_count: number | null;
+      started_at: string;
+      finished_at: string | null;
+    }>>(`/runs?${params.toString()}`);
   }
 };
 
