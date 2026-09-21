@@ -37,11 +37,13 @@ import {
   type FieldResult
   , type ClassificationTestResult
 } from "./api.ts";
+import { loadPreferences, savePreferences } from "./lib/supabaseHelpers";
 
 type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
+  userId?: string;
   onSignOut: () => void;
 };
 
@@ -53,7 +55,7 @@ const statusMeta: Record<EmailStatus, { label: string; className: string }> = {
   Classified: { label: "Classified", className: "status-neutral" }
 };
 
-function Dashboard({ userEmail, onSignOut }: DashboardProps) {
+function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   const [view, setView] = useState<View>("inbox");
   const [selected, setSelected] = useState<EmailRecord | null>(null);
   const [query, setQuery] = useState("");
@@ -65,6 +67,32 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
+  // Hydrate user preferences from Supabase on mount
+  useEffect(() => {
+    if (!userId) return;
+    loadPreferences(userId).then((prefs) => {
+      setDark(prefs.theme === "dark");
+      if (prefs.last_view && ["inbox", "review", "runs", "test", "export"].includes(prefs.last_view)) {
+        setView(prefs.last_view as View);
+      }
+    });
+  }, [userId]);
+
+  // Persist theme changes
+  const toggleTheme = () => {
+    const newDark = !dark;
+    setDark(newDark);
+    if (userId) savePreferences(userId, { theme: newDark ? "dark" : "light" });
+  };
+
+  // Persist view changes
+  const changeView = (newView: View) => {
+    setView(newView);
+    setSelected(null);
+    setMobileNav(false);
+    if (userId) savePreferences(userId, { last_view: newView });
+  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -147,11 +175,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
             label="Inbox"
             count={emails.length.toString()}
             active={view === "inbox"}
-            onClick={() => {
-              setView("inbox");
-              setSelected(null);
-              setMobileNav(false);
-            }}
+            onClick={() => changeView("inbox")}
           />
           <NavButton
             icon={<AlertTriangle size={16} />}
@@ -160,32 +184,20 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
               .filter((email) => email.status === "Needs review")
               .length.toString()}
             active={view === "review"}
-            onClick={() => {
-              setView("review");
-              setSelected(null);
-              setMobileNav(false);
-            }}
+            onClick={() => changeView("review")}
           />
           <NavButton
             icon={<Activity size={16} />}
             label="Run status"
             active={view === "runs"}
-            onClick={() => {
-              setView("runs");
-              setSelected(null);
-              setMobileNav(false);
-            }}
+            onClick={() => changeView("runs")}
           />
-          <NavButton icon={<Activity size={16} />} label="Test" active={view === "test"} onClick={() => { setView("test"); setSelected(null); setMobileNav(false); }} />
+          <NavButton icon={<Activity size={16} />} label="Test" active={view === "test"} onClick={() => changeView("test")} />
           <NavButton
             icon={<BarChart3 size={16} />}
             label="Export"
             active={view === "export"}
-            onClick={() => {
-              setView("export");
-              setSelected(null);
-              setMobileNav(false);
-            }}
+            onClick={() => changeView("export")}
           />
         </nav>
         <div className="sidebar-spacer" />
@@ -283,7 +295,7 @@ function Dashboard({ userEmail, onSignOut }: DashboardProps) {
             </button>
             <button
               className="icon-button"
-              onClick={() => setDark(!dark)}
+              onClick={toggleTheme}
               aria-label="Toggle theme"
             >
               {dark ? <Sun size={17} /> : <Moon size={17} />}
@@ -1112,6 +1124,16 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
   const [run, setRun] = useState<ClassificationTestResult | null>(null);
   const [running, setRunning] = useState(false);
   const [selected, setSelected] = useState<ClassificationTestResult["results"][number] | null>(null);
+
+  useEffect(() => {
+    // Load most recent classification test run from DB
+    api.getRuns("classification_test", 1).then(runs => {
+      if (runs.length > 0 && runs[0].results) {
+        setRun(runs[0].results as unknown as ClassificationTestResult);
+      }
+    }).catch(console.error);
+  }, []);
+
   const execute = async () => { setRunning(true); try { setRun(await api.runClassificationTest()); onNotify("Classification test completed"); } catch (error) { onNotify(error instanceof Error ? error.message : "Test failed"); } finally { setRunning(false); } };
   const labels = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"];
   return <section className="page-wrap">
@@ -1119,7 +1141,7 @@ function TestView({ onNotify }: { onNotify: (message: string) => void }) {
     {!run ? <div className="empty-state"><Activity size={24} /><strong>No test run yet</strong><span>Run the complete classification pipeline to inspect accuracy and errors.</span></div> : <>
       <div className="stats-strip"><div className="stat"><span>Accuracy</span><strong>{(run.accuracy * 100).toFixed(1)}%</strong><small>{run.correct} / {run.total} correct</small></div><div className="stat"><span>Macro precision</span><strong>{(run.macro.precision * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro sensitivity</span><strong>{(run.macro.recall * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro F1</span><strong>{(run.macro.f1 * 100).toFixed(1)}%</strong></div><div className="stat"><span>Review escalations</span><strong>{run.review_count}</strong></div></div>
       <div className="test-grid"><div><div className="panel-heading"><div><span className="eyebrow">CONFUSION MATRIX</span><h2>Actual versus predicted</h2></div></div><div className="matrix-wrap"><table className="test-matrix"><thead><tr><th>Actual \ Predicted</th>{labels.map(label => <th key={label}>{label.replace("_", " ")}</th>)}</tr></thead><tbody>{labels.map(actual => <tr key={actual}><th>{actual.replace("_", " ")}</th>{labels.map(predicted => <td className={actual === predicted ? "matrix-correct" : ""} key={predicted}>{run.confusion_matrix[actual]?.[predicted] ?? 0}</td>)}</tr>)}</tbody></table></div></div><div className="score-panel"><span className="eyebrow">PER-CATEGORY QUALITY</span>{labels.map(label => <div className="test-metric" key={label}><strong>{label.replace("_", " ")}</strong><span>P {(run.per_category[label].precision * 100).toFixed(1)}% · R {(run.per_category[label].recall * 100).toFixed(1)}% · F1 {(run.per_category[label].f1 * 100).toFixed(1)}%</span><small>{run.per_category[label].support} actual records</small></div>)}</div></div>
-      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Ground truth versus classifier</h2></div></div><div className="test-result-head"><span>Email</span><span>Ground truth</span><span>Predicted</span><span>Confidence</span><span /></div>{run.results.filter(item => !item.correct).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{(item.confidence * 100).toFixed(1)}%</span><ChevronRight size={15} /></button>)}{run.results.every(item => item.correct) && <div className="empty-state"><CheckCircle2 size={22} /><strong>No misclassifications</strong></div>}</div>
+      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Ground truth versus classifier</h2></div></div><div className="test-result-head"><span>Email</span><span>Ground truth</span><span>Predicted</span><span>Confidence</span><span /></div>{(run.results || []).filter(item => !item.correct).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{(item.confidence * 100).toFixed(1)}%</span><ChevronRight size={15} /></button>)}{(run.results || []).every(item => item.correct) && <div className="empty-state"><CheckCircle2 size={22} /><strong>No misclassifications</strong></div>}</div>
       {selected && <div className="test-detail"><button className="icon-button" onClick={() => setSelected(null)}><X size={16} /></button><span className="eyebrow">TEST DETAIL</span><h2>{selected.email_id}</h2><p>{selected.subject}</p><div className="test-detail-values"><span>Ground truth<strong>{selected.actual}</strong></span><span>Predicted<strong>{selected.predicted}</strong></span><span>Score<strong>{(selected.confidence * 100).toFixed(1)}%</strong></span><span>Path<strong>{selected.provider === "spacy" ? "NLP comparison" : "LLM fallback"}</strong></span></div>{selected.review_reason && <p className="reason-copy">{selected.review_reason}</p>}</div>}
     </>}
   </section>;
@@ -1136,6 +1158,13 @@ function RunsView({
   const comparisons = emails.filter(
     (email) => email.category === "Comparison request"
   ).length;
+
+  const [dbRuns, setDbRuns] = useState<any[]>([]);
+  
+  useEffect(() => {
+    api.getRuns().then(setDbRuns).catch(console.error);
+  }, []);
+
   return (
     <section className="page-wrap">
       <div className="page-heading">
@@ -1201,6 +1230,38 @@ function RunsView({
             </span>
           </div>
         ))}
+      </div>
+
+      <div className="run-overview" style={{ marginTop: '32px' }}>
+        <div>
+          <span className="eyebrow">PIPELINE HISTORY</span>
+          <strong>Recent executions from database</strong>
+          <span>Persisted test runs, submissions, and full pipeline runs</span>
+        </div>
+      </div>
+      <div className="run-table">
+        <div className="run-head">
+          <span>Run ID</span>
+          <span>Type</span>
+          <span>Status</span>
+          <span>Emails</span>
+          <span>Score</span>
+        </div>
+        {dbRuns.length === 0 ? (
+          <div className="no-comparison" style={{ padding: '24px' }}>
+            <span style={{ color: '#888' }}>No pipeline history found.</span>
+          </div>
+        ) : (
+          dbRuns.map((run) => (
+            <div className="run-row" key={run.id}>
+              <strong className="mono" style={{ fontSize: '12px' }}>{run.id.split('-')[0]}</strong>
+              <span>{run.run_type.replace('_', ' ')}</span>
+              <span className={run.status === 'failed' ? "result-alert" : ""}>{run.status}</span>
+              <span>{run.email_count ?? "—"}</span>
+              <strong>{run.score !== null ? `${(run.score * 100).toFixed(1)}%` : "—"}</strong>
+            </div>
+          ))
+        )}
       </div>
     </section>
   );
