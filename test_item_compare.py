@@ -1,4 +1,4 @@
-import item_compare
+from server.comparison import legacy_item_compare as item_compare
 
 def test_item_comparison():
     # Test 1: Feature difference
