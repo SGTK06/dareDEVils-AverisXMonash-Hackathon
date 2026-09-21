@@ -65,8 +65,10 @@ def classify_email(email_id: str):
 @app.post("/classifications/run")
 def classify_inbox():
     results = []
-    for email in _load_inbox():
-        result = classifier.classify_with_fallback(email).to_dict()
+    emails = _load_inbox()
+    classified = classifier.classify_many(emails)
+    for email, classification in zip(emails, classified):
+        result = classification.to_dict()
         save_classification(email["email_id"], {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
         results.append({"email_id": email["email_id"], **result})
     return {"count": len(results), "results": results}
@@ -76,8 +78,10 @@ def run_classification_test():
     truth = _load_ground_truth()
     results = []
     matrix = {actual: {predicted: 0 for predicted in TEST_CATEGORIES} for actual in TEST_CATEGORIES}
-    for email in _load_inbox():
-        result = classifier.classify_with_fallback(email).to_dict()
+    emails = _load_inbox()
+    classified = classifier.classify_many(emails)
+    for email, classification in zip(emails, classified):
+        result = classification.to_dict()
         actual = truth.get(email["email_id"], {}).get("category", "GENERAL")
         predicted = result["category"] if result["category"] in TEST_CATEGORIES else "GENERAL"
         matrix.setdefault(actual, {label: 0 for label in TEST_CATEGORIES})

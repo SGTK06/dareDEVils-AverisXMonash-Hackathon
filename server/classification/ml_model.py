@@ -14,7 +14,13 @@ class RandomForestMailModel:
         return self._classifier
 
     def predict(self, vector):
-        probabilities = self.classifier.predict_proba(vector)[0]
+        return self._result(self.classifier.predict_proba(vector)[0])
+
+    def predict_many(self, vectors):
+        probabilities = self.classifier.predict_proba(vectors)
+        return [self._result(row) for row in probabilities]
+
+    def _result(self, probabilities):
         index = probabilities.argmax()
         return (str(self.classifier.classes_[index]), float(probabilities[index]),
                 {str(label): float(score) for label, score in zip(self.classifier.classes_, probabilities)})

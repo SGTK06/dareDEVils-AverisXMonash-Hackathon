@@ -7,6 +7,7 @@ class ClassificationConfig:
     review_threshold: float = 0.80
     temperature: float = 0.15
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_batch_size: int = 32
     classifier_path: Path = Path("models/random_forest_classifier.joblib")
 
 @dataclass

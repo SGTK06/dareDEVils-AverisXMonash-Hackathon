@@ -8,7 +8,9 @@ from .preprocessing import preprocess_email
 class MailClassifier:
     def __init__(self, config: ClassificationConfig | None = None):
         self.config = config or load_config()
-        self._embeddings = SentenceEmbeddingService(self.config.embedding_model)
+        self._embeddings = SentenceEmbeddingService(
+            self.config.embedding_model, self.config.embedding_batch_size
+        )
         self._model = RandomForestMailModel(self.config.classifier_path)
 
     def classify(self, email: dict) -> ClassificationResult:
@@ -24,4 +26,26 @@ class MailClassifier:
         return self.classify(email)
 
     def classify_many(self, emails: list[dict]) -> list[ClassificationResult]:
-        return [self.classify(email) for email in emails]
+        if not emails:
+            return []
+
+        texts = [preprocess_email(email) for email in emails]
+        non_empty = [index for index, text in enumerate(texts) if text]
+        vectors = self._embeddings.encode([texts[index] for index in non_empty]) if non_empty else []
+        predictions = self._model.predict_many(vectors) if non_empty else []
+        prediction_by_index = dict(zip(non_empty, predictions))
+
+        results = []
+        for index, text in enumerate(texts):
+            if not text:
+                results.append(ClassificationResult(
+                    "GENERAL", 0.0, {}, True, "empty_message", "random_forest"
+                ))
+                continue
+            category, confidence, scores = prediction_by_index[index]
+            review = confidence < self.config.review_threshold
+            results.append(ClassificationResult(
+                category, confidence, scores, review,
+                "low_model_confidence" if review else None, "random_forest"
+            ))
+        return results
