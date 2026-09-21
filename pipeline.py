@@ -6,7 +6,7 @@ import math
 import re
 
 import spacy
-import compare
+from server.comparison import legacy_compare as compare
 
 # --- CLASSIFIER LOGIC ---
 

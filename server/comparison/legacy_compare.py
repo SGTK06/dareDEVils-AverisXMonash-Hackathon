@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-import item_compare
+from . import legacy_item_compare as item_compare
 
 FIELD_ORDER = [
     "shipper",
@@ -23,7 +23,6 @@ FIELD_ORDER = [
     "port_of_discharge",
     "container_count",
     "gross_weight_kg",
-    "description_of_goods",
 ]
 
 REVIEW_THRESHOLD = 0.85
@@ -76,12 +75,14 @@ LABEL_ALIASES = {
         "LOAD PORT",
         "POL",
         "PORT OF LOADING POL",
+        "PORT OF LOADING POL",
     },
     "port_of_discharge": {
         "PORT OF DISCHARGE",
         "DISCHARGE PORT",
         "POD",
         "PORT OF DISCHARGE POD",
+        "DISCHARGE PORT POD",
     },
     "container_count": {
         "CONTAINER COUNT",
@@ -97,6 +98,7 @@ LABEL_ALIASES = {
         "GROSS WT KG",
         "GROSS WT (KGS)",
         "GROSS WT (KG)",
+        "GROSS WT KGS",
     },
     "description_of_goods": {
         "DESCRIPTION OF GOODS",
@@ -378,8 +380,9 @@ def extract_fields(document_text: Optional[str]) -> Dict[str, str]:
         if not line:
             continue
             
-        if ":" in line:
-            label_text, value_text = line.split(":", 1)
+        if ":" in line or "|" in line:
+            delimiter = ":" if ":" in line else "|"
+            label_text, value_text = line.split(delimiter, 1)
             field_name = _canonical_field_name(label_text)
             if field_name is not None:
                 current_field = field_name
@@ -387,6 +390,10 @@ def extract_fields(document_text: Optional[str]) -> Dict[str, str]:
                 if value:
                     fields[current_field] = value
                 continue
+
+            # A structured but unknown row starts a new table field; do not
+            # append it to the preceding recognized field.
+            current_field = None
                 
         if current_field:
             if current_field in fields:
@@ -403,50 +410,7 @@ def compare_document_pair(si_document: Optional[str], bl_document: Optional[str]
     bl_fields = extract_fields(bl_document)
     results: Dict[str, Dict[str, object]] = {}
     for field in FIELD_ORDER:
-        if field == "description_of_goods":
-            si_items = si_fields.get(field, "").split('\n')
-            bl_items = bl_fields.get(field, "").split('\n')
-            si_items = [x.strip() for x in si_items if x.strip()]
-            bl_items = [x.strip() for x in bl_items if x.strip()]
-            
-            if not si_items and not bl_items:
-                results[field] = {
-                    "field": field,
-                    "verdict": "REVIEW",
-                    "similarity": 0.0,
-                    "distance": 0,
-                    "note": "A required field is missing; review is required.",
-                    "item_results": []
-                }
-            elif not si_items or not bl_items:
-                results[field] = {
-                    "field": field,
-                    "verdict": "REVIEW",
-                    "similarity": 0.0,
-                    "distance": 0,
-                    "note": "A required field is empty; review is required.",
-                    "item_results": []
-                }
-            else:
-                item_results = item_compare.compare_items(si_items, bl_items)
-                verdicts = [res['verdict'] for res in item_results]
-                if 'MISMATCH' in verdicts:
-                    overall = 'MISMATCH'
-                elif 'REVIEW' in verdicts:
-                    overall = 'REVIEW'
-                else:
-                    overall = 'MATCH'
-                    
-                results[field] = {
-                    "field": field,
-                    "verdict": overall,
-                    "similarity": sum(r['cosine'] for r in item_results) / len(item_results) if item_results else 0.0,
-                    "distance": 0,
-                    "note": f"Item comparison: {len(item_results)} items processed.",
-                    "item_results": item_results
-                }
-        else:
-            results[field] = compare_field(field, si_fields.get(field), bl_fields.get(field))
+        results[field] = compare_field(field, si_fields.get(field), bl_fields.get(field))
     return results
 
 
