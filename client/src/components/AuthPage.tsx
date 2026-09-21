@@ -63,6 +63,7 @@ export function AuthPage() {
           type="button"
           onClick={handleGoogleAuth}
           disabled={loading}
+          style={{ color: '#fff' }}
           className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-neutral-800 bg-transparent px-4 py-2.5 text-[14px] font-medium text-white transition-colors hover:border-neutral-600 hover:bg-neutral-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:pointer-events-none disabled:opacity-40"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">

@@ -23,6 +23,7 @@ Environment
     GROUND_TRUTH   default /secrets/ground_truth.json   (private mount)
     REVEAL_GT      "1" to enable /ground_truth (default off)
     JUDGE_TOKEN    if set, /ground_truth requires header X-Judge-Token: <token>
+    CORS_ORIGINS   comma-separated allowed browser origins (default: *)
 """
 import json
 import os
@@ -35,6 +36,7 @@ except ImportError:
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from classification import MailClassifier
@@ -49,10 +51,22 @@ GROUND_TRUTH_PATH = Path(os.environ.get("GROUND_TRUTH", "/secrets/ground_truth.j
 SAMPLE_PATH = DATA_DIR / "sample_submission.json"
 REVEAL_GT = os.environ.get("REVEAL_GT", "0") == "1"
 JUDGE_TOKEN = os.environ.get("JUDGE_TOKEN")
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 
 app = FastAPI(title="SDOC Hackathon Inbox", version="2.0",
               description="Serves the shipping-docs inbox and scores submissions. "
               "Ground truth is held privately and never served.")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["*"]
+)
 classifier = MailClassifier()
 TEST_CATEGORIES = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"]
 
@@ -74,20 +88,23 @@ def classify_inbox():
     cached = get_classifications_batch(email_ids)
     
     results = []
+    uncached_emails = [e for e in inbox_emails if e["email_id"] not in cached]
+    classified = classifier.classify_many(uncached_emails)
+    classified_dict = {e["email_id"]: c for e, c in zip(uncached_emails, classified)}
+    
     payloads = []
     for email in inbox_emails:
         eid = email["email_id"]
         if eid in cached:
             results.append(cached[eid])
         else:
-            result = classifier.classify_with_fallback(email).to_dict()
+            result = classified_dict[eid].to_dict()
             payload = {"email_id": eid, **result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"}
             payloads.append(payload)
             results.append(payload)
             
     if payloads:
         save_classifications_batch(payloads)
-        
     return {"count": len(results), "results": results}
 
 @app.post("/tests/classification")
@@ -95,8 +112,10 @@ def run_classification_test():
     truth = _load_ground_truth()
     results = []
     matrix = {actual: {predicted: 0 for predicted in TEST_CATEGORIES} for actual in TEST_CATEGORIES}
-    for email in _load_inbox():
-        result = classifier.classify_with_fallback(email).to_dict()
+    emails = _load_inbox()
+    classified = classifier.classify_many(emails)
+    for email, classification in zip(emails, classified):
+        result = classification.to_dict()
         actual = truth.get(email["email_id"], {}).get("category", "GENERAL")
         predicted = result["category"] if result["category"] in TEST_CATEGORIES else "GENERAL"
         matrix.setdefault(actual, {label: 0 for label in TEST_CATEGORIES})

@@ -34,16 +34,14 @@ import {
   api,
   type EmailRecord,
   type EmailStatus,
-  type FieldResult
-  , type ClassificationTestResult
+  type FieldResult,
+  type ClassificationTestResult
 } from "./api.ts";
-import { loadPreferences, savePreferences } from "./lib/supabaseHelpers";
 
 type View = "inbox" | "review" | "runs" | "test" | "export";
 
 type DashboardProps = {
   userEmail: string;
-  userId?: string;
   onSignOut: () => void;
 };
 
@@ -55,7 +53,7 @@ const statusMeta: Record<EmailStatus, { label: string; className: string }> = {
   Classified: { label: "Classified", className: "status-neutral" }
 };
 
-function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
+function Dashboard({ userEmail, onSignOut }: DashboardProps) {
   const [view, setView] = useState<View>("inbox");
   const [selected, setSelected] = useState<EmailRecord | null>(null);
   const [query, setQuery] = useState("");
@@ -67,32 +65,6 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-
-  // Hydrate user preferences from Supabase on mount
-  useEffect(() => {
-    if (!userId) return;
-    loadPreferences(userId).then((prefs) => {
-      setDark(prefs.theme === "dark");
-      if (prefs.last_view && ["inbox", "review", "runs", "test", "export"].includes(prefs.last_view)) {
-        setView(prefs.last_view as View);
-      }
-    });
-  }, [userId]);
-
-  // Persist theme changes
-  const toggleTheme = () => {
-    const newDark = !dark;
-    setDark(newDark);
-    if (userId) savePreferences(userId, { theme: newDark ? "dark" : "light" });
-  };
-
-  // Persist view changes
-  const changeView = (newView: View) => {
-    setView(newView);
-    setSelected(null);
-    setMobileNav(false);
-    if (userId) savePreferences(userId, { last_view: newView });
-  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -175,7 +147,11 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
             label="Inbox"
             count={emails.length.toString()}
             active={view === "inbox"}
-            onClick={() => changeView("inbox")}
+            onClick={() => {
+              setView("inbox");
+              setSelected(null);
+              setMobileNav(false);
+            }}
           />
           <NavButton
             icon={<AlertTriangle size={16} />}
@@ -184,20 +160,41 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
               .filter((email) => email.status === "Needs review")
               .length.toString()}
             active={view === "review"}
-            onClick={() => changeView("review")}
+            onClick={() => {
+              setView("review");
+              setSelected(null);
+              setMobileNav(false);
+            }}
           />
           <NavButton
             icon={<Activity size={16} />}
             label="Run status"
             active={view === "runs"}
-            onClick={() => changeView("runs")}
+            onClick={() => {
+              setView("runs");
+              setSelected(null);
+              setMobileNav(false);
+            }}
           />
-          <NavButton icon={<Activity size={16} />} label="Test" active={view === "test"} onClick={() => changeView("test")} />
+          <NavButton
+            icon={<Activity size={16} />}
+            label="Test"
+            active={view === "test"}
+            onClick={() => {
+              setView("test");
+              setSelected(null);
+              setMobileNav(false);
+            }}
+          />
           <NavButton
             icon={<BarChart3 size={16} />}
             label="Export"
             active={view === "export"}
-            onClick={() => changeView("export")}
+            onClick={() => {
+              setView("export");
+              setSelected(null);
+              setMobileNav(false);
+            }}
           />
         </nav>
         <div className="sidebar-spacer" />
@@ -281,7 +278,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
                     ? "Run status"
                     : view === "test"
                       ? "Test"
-                    : "Export"}
+                      : "Export"}
             </strong>
           </div>
           <div className="top-actions">
@@ -295,7 +292,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
             </button>
             <button
               className="icon-button"
-              onClick={toggleTheme}
+              onClick={() => setDark(!dark)}
               aria-label="Toggle theme"
             >
               {dark ? <Sun size={17} /> : <Moon size={17} />}
@@ -364,7 +361,9 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
         {!loading && !loadError && view === "runs" && (
           <RunsView emails={emails} onNotify={notify} />
         )}
-        {!loading && !loadError && view === "test" && <TestView onNotify={notify} />}
+        {!loading && !loadError && view === "test" && (
+          <TestView onNotify={notify} />
+        )}
         {!loading && !loadError && view === "export" && (
           <ExportView emails={emails} onNotify={notify} />
         )}
@@ -486,7 +485,7 @@ function InboxView({
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 60px)",
+        height: "calc(100vh - 65px)",
         overflow: "hidden"
       }}
     >
@@ -711,13 +710,14 @@ function DetailView({
   const fields = email.fields ?? [];
   const [edited, setEdited] = useState<Record<string, string>>({});
   const reviewRequired = email.status === "Needs review" || email.checkRequired;
-  const processingLabel = email.classificationProvider === "gemini"
-    ? "LLM fallback"
-    : email.classificationProvider === "spacy"
-      ? "NLP comparison"
-      : email.classificationProvider === "primary+gemini_failed"
-        ? "NLP comparison · LLM fallback"
-        : "Classification pipeline";
+  const processingLabel =
+    email.classificationProvider === "gemini"
+      ? "LLM fallback"
+      : email.classificationProvider === "spacy"
+        ? "NLP comparison"
+        : email.classificationProvider === "primary+gemini_failed"
+          ? "NLP comparison · LLM fallback"
+          : "Classification pipeline";
   return (
     <section className="detail-layout">
       <div className="detail-header">
@@ -757,7 +757,8 @@ function DetailView({
             <div className="classification">
               <span className="category-badge">{email.category}</span>
               <span className="confidence">
-                {(email.categoryConfidence * 100).toFixed(1)}% · {processingLabel}
+                {(email.categoryConfidence * 100).toFixed(1)}% ·{" "}
+                {processingLabel}
               </span>
             </div>
             {reclassify && (
@@ -785,7 +786,7 @@ function DetailView({
                   <FileText size={16} />
                   <div>
                     <strong>{file}</strong>
-                  <span>Attachment available from inbox</span>
+                    <span>Attachment available from inbox</span>
                   </div>
                   <button className="icon-button" aria-label={`View ${file}`}>
                     <PanelRight size={15} />
@@ -811,7 +812,9 @@ function DetailView({
             />
             <TimelineStep
               label="Compared"
-              time={email.status === "Failed" ? "Waiting" : "Completed on demand"}
+              time={
+                email.status === "Failed" ? "Waiting" : "Completed on demand"
+              }
               state={email.status === "Failed" ? "waiting" : "done"}
             />
             <TimelineStep
@@ -882,11 +885,39 @@ function DetailView({
                 >
                   <strong>{field.field}</strong>
                   <span className="value-cell">
-                  {reviewRequired ? <input className="review-input" aria-label={`${field.field} SI value`} defaultValue={field.si} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_si`]: e.target.value }))} /> : <code>{field.si}</code>}
+                    {reviewRequired ? (
+                      <input
+                        className="review-input"
+                        aria-label={`${field.field} SI value`}
+                        defaultValue={field.si}
+                        onChange={(e) =>
+                          setEdited((v) => ({
+                            ...v,
+                            [`${field.field}_si`]: e.target.value
+                          }))
+                        }
+                      />
+                    ) : (
+                      <code>{field.si}</code>
+                    )}
                     <Confidence value={field.confidence} />
                   </span>
                   <span className="value-cell">
-                    {reviewRequired ? <input className="review-input" aria-label={`${field.field} BL value`} defaultValue={field.bl} onChange={(e) => setEdited((v) => ({ ...v, [`${field.field}_bl`]: e.target.value }))} /> : <code>{field.bl}</code>}
+                    {reviewRequired ? (
+                      <input
+                        className="review-input"
+                        aria-label={`${field.field} BL value`}
+                        defaultValue={field.bl}
+                        onChange={(e) =>
+                          setEdited((v) => ({
+                            ...v,
+                            [`${field.field}_bl`]: e.target.value
+                          }))
+                        }
+                      />
+                    ) : (
+                      <code>{field.bl}</code>
+                    )}
                     <Confidence value={field.confidence} />
                   </span>
                   <span>
@@ -923,8 +954,19 @@ function DetailView({
           </div>
           {reviewRequired && (
             <div className="review-save-bar">
-              <span><AlertTriangle size={15} /> Check required · edit values, then resolve this case.</span>
-              <button className="button button-primary" onClick={async () => { await api.correct(email.id, edited); onNotify("Correction saved and review resolved"); }}>Save correction</button>
+              <span>
+                <AlertTriangle size={15} /> Check required · edit values, then
+                resolve this case.
+              </span>
+              <button
+                className="button button-primary"
+                onClick={async () => {
+                  await api.correct(email.id, edited);
+                  onNotify("Correction saved and review resolved");
+                }}
+              >
+                Save correction
+              </button>
             </div>
           )}
         </div>
@@ -1052,7 +1094,7 @@ function ReviewView({
     (email) => email.status === "Needs review"
   );
   return (
-    <section className="page-wrap">
+    <section className="page-wrap review-page">
       <div className="page-heading">
         <div>
           <h1>Review queue</h1>
@@ -1077,37 +1119,48 @@ function ReviewView({
           </span>
         </div>
       </div>
-      <div className="review-list">
-        {reviewEmails.map((email) => (
-          <button
-            className="review-item"
-            key={email.id}
-            onClick={() => onOpen(email)}
-          >
-            <div className="review-item-main">
-              <div className="review-icon">
-                <AlertTriangle size={16} />
+      <div className="review-scroll">
+        <div className="review-list">
+          {reviewEmails.map((email) => (
+            <button
+              className="review-item"
+              key={email.id}
+              onClick={() => onOpen(email)}
+            >
+              <div className="review-item-main">
+                <div className="review-icon">
+                  <AlertTriangle size={16} />
+                </div>
+                <div>
+                  <strong>{email.subject}</strong>
+                  <span>
+                    {email.sender} · {email.id}
+                  </span>
+                </div>
               </div>
-              <div>
-                <strong>{email.subject}</strong>
-                <span>
-                  {email.sender} · {email.id}
-                </span>
+              <div className="review-reason">
+                <span>REASON</span>
+                <strong>{email.reason}</strong>
               </div>
-            </div>
-            <div className="review-reason">
-              <span>REASON</span>
-              <strong>{email.reason}</strong>
-            </div>
-            <div className="review-fields">
-              <span>Affected</span>
-              <b>
-                {email.missingAttachment ? "Attachment missing" : email.fields?.filter((field) => field.result === "review" || field.result === "mismatch").map((field) => field.field).join(", ") || "Classification confidence"}
-              </b>
-            </div>
-            <ChevronRight size={17} />
-          </button>
-        ))}
+              <div className="review-fields">
+                <span>Affected</span>
+                <b>
+                  {email.missingAttachment
+                    ? "Attachment missing"
+                    : email.fields
+                        ?.filter(
+                          (field) =>
+                            field.result === "review" ||
+                            field.result === "mismatch"
+                        )
+                        .map((field) => field.field)
+                        .join(", ") || "Classification confidence"}
+                </b>
+              </div>
+              <ChevronRight size={17} />
+            </button>
+          ))}
+        </div>
       </div>
       <div className="review-empty-note">
         <CheckCircle2 size={17} />
@@ -1123,28 +1176,213 @@ function ReviewView({
 function TestView({ onNotify }: { onNotify: (message: string) => void }) {
   const [run, setRun] = useState<ClassificationTestResult | null>(null);
   const [running, setRunning] = useState(false);
-  const [selected, setSelected] = useState<ClassificationTestResult["results"][number] | null>(null);
-
-  useEffect(() => {
-    // Load most recent classification test run from DB
-    api.getRuns("classification_test", 1).then(runs => {
-      if (runs.length > 0 && runs[0].results) {
-        setRun(runs[0].results as unknown as ClassificationTestResult);
-      }
-    }).catch(console.error);
-  }, []);
-
-  const execute = async () => { setRunning(true); try { setRun(await api.runClassificationTest()); onNotify("Classification test completed"); } catch (error) { onNotify(error instanceof Error ? error.message : "Test failed"); } finally { setRunning(false); } };
-  const labels = ["BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM"];
-  return <section className="page-wrap">
-    <div className="page-heading"><div><h1>Pipeline test</h1><p>Re-run classification across all 520 emails against the private ground truth.</p></div><button className="button button-primary" onClick={execute} disabled={running}><RefreshCw size={15} /> {running ? "Running 520 emails..." : "Run classification test"}</button></div>
-    {!run ? <div className="empty-state"><Activity size={24} /><strong>No test run yet</strong><span>Run the complete classification pipeline to inspect accuracy and errors.</span></div> : <>
-      <div className="stats-strip"><div className="stat"><span>Accuracy</span><strong>{(run.accuracy * 100).toFixed(1)}%</strong><small>{run.correct} / {run.total} correct</small></div><div className="stat"><span>Macro precision</span><strong>{(run.macro.precision * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro sensitivity</span><strong>{(run.macro.recall * 100).toFixed(1)}%</strong></div><div className="stat"><span>Macro F1</span><strong>{(run.macro.f1 * 100).toFixed(1)}%</strong></div><div className="stat"><span>Review escalations</span><strong>{run.review_count}</strong></div></div>
-      <div className="test-grid"><div><div className="panel-heading"><div><span className="eyebrow">CONFUSION MATRIX</span><h2>Actual versus predicted</h2></div></div><div className="matrix-wrap"><table className="test-matrix"><thead><tr><th>Actual \ Predicted</th>{labels.map(label => <th key={label}>{label.replace("_", " ")}</th>)}</tr></thead><tbody>{labels.map(actual => <tr key={actual}><th>{actual.replace("_", " ")}</th>{labels.map(predicted => <td className={actual === predicted ? "matrix-correct" : ""} key={predicted}>{run.confusion_matrix[actual]?.[predicted] ?? 0}</td>)}</tr>)}</tbody></table></div></div><div className="score-panel"><span className="eyebrow">PER-CATEGORY QUALITY</span>{labels.map(label => <div className="test-metric" key={label}><strong>{label.replace("_", " ")}</strong><span>P {(run.per_category[label].precision * 100).toFixed(1)}% · R {(run.per_category[label].recall * 100).toFixed(1)}% · F1 {(run.per_category[label].f1 * 100).toFixed(1)}%</span><small>{run.per_category[label].support} actual records</small></div>)}</div></div>
-      <div className="test-results"><div className="panel-heading"><div><span className="eyebrow">RECORD-LEVEL RESULTS</span><h2>Ground truth versus classifier</h2></div></div><div className="test-result-head"><span>Email</span><span>Ground truth</span><span>Predicted</span><span>Confidence</span><span /></div>{(run.results || []).filter(item => !item.correct).map(item => <button className="test-result-row" key={item.email_id} onClick={() => setSelected(item)}><span><strong>{item.email_id}</strong><small>{item.subject}</small></span><span>{item.actual}</span><span className="result-alert">{item.predicted}</span><span>{(item.confidence * 100).toFixed(1)}%</span><ChevronRight size={15} /></button>)}{(run.results || []).every(item => item.correct) && <div className="empty-state"><CheckCircle2 size={22} /><strong>No misclassifications</strong></div>}</div>
-      {selected && <div className="test-detail"><button className="icon-button" onClick={() => setSelected(null)}><X size={16} /></button><span className="eyebrow">TEST DETAIL</span><h2>{selected.email_id}</h2><p>{selected.subject}</p><div className="test-detail-values"><span>Ground truth<strong>{selected.actual}</strong></span><span>Predicted<strong>{selected.predicted}</strong></span><span>Score<strong>{(selected.confidence * 100).toFixed(1)}%</strong></span><span>Path<strong>{selected.provider === "spacy" ? "NLP comparison" : "LLM fallback"}</strong></span></div>{selected.review_reason && <p className="reason-copy">{selected.review_reason}</p>}</div>}
-    </>}
-  </section>;
+  const [selected, setSelected] = useState<
+    ClassificationTestResult["results"][number] | null
+  >(null);
+  const execute = async () => {
+    setRunning(true);
+    try {
+      setRun(await api.runClassificationTest());
+      onNotify("Classification test completed");
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : "Test failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+  const labels = [
+    "BL_COMPARISON",
+    "SI_REQUEST",
+    "INVOICE_QUERY",
+    "GENERAL",
+    "SPAM"
+  ];
+  return (
+    <section className="page-wrap">
+      <div className="page-heading">
+        <div>
+          <h1>Pipeline test</h1>
+          <p>
+            Re-run classification across all 520 emails against the private
+            ground truth.
+          </p>
+        </div>
+        <button
+          className="button button-primary"
+          onClick={execute}
+          disabled={running}
+        >
+          <RefreshCw size={15} />{" "}
+          {running ? "Running 520 emails..." : "Run classification test"}
+        </button>
+      </div>
+      {!run ? (
+        <div className="empty-state">
+          <Activity size={24} />
+          <strong>No test run yet</strong>
+          <span>
+            Run the complete classification pipeline to inspect accuracy and
+            errors.
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className="stats-strip">
+            <div className="stat">
+              <span>Accuracy</span>
+              <strong>{(run.accuracy * 100).toFixed(1)}%</strong>
+              <small>
+                {run.correct} / {run.total} correct
+              </small>
+            </div>
+            <div className="stat">
+              <span>Macro precision</span>
+              <strong>{(run.macro.precision * 100).toFixed(1)}%</strong>
+            </div>
+            <div className="stat">
+              <span>Macro sensitivity</span>
+              <strong>{(run.macro.recall * 100).toFixed(1)}%</strong>
+            </div>
+            <div className="stat">
+              <span>Macro F1</span>
+              <strong>{(run.macro.f1 * 100).toFixed(1)}%</strong>
+            </div>
+            <div className="stat">
+              <span>Review escalations</span>
+              <strong>{run.review_count}</strong>
+            </div>
+          </div>
+          <div className="test-grid">
+            <div>
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">CONFUSION MATRIX</span>
+                  <h2>Actual versus predicted</h2>
+                </div>
+              </div>
+              <div className="matrix-wrap">
+                <table className="test-matrix">
+                  <thead>
+                    <tr>
+                      <th>Actual \ Predicted</th>
+                      {labels.map((label) => (
+                        <th key={label}>{label.replace("_", " ")}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {labels.map((actual) => (
+                      <tr key={actual}>
+                        <th>{actual.replace("_", " ")}</th>
+                        {labels.map((predicted) => (
+                          <td
+                            className={
+                              actual === predicted ? "matrix-correct" : ""
+                            }
+                            key={predicted}
+                          >
+                            {run.confusion_matrix[actual]?.[predicted] ?? 0}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="score-panel">
+              <span className="eyebrow">PER-CATEGORY QUALITY</span>
+              {labels.map((label) => (
+                <div className="test-metric" key={label}>
+                  <strong>{label.replace("_", " ")}</strong>
+                  <span>
+                    P {(run.per_category[label].precision * 100).toFixed(1)}% ·
+                    R {(run.per_category[label].recall * 100).toFixed(1)}% · F1{" "}
+                    {(run.per_category[label].f1 * 100).toFixed(1)}%
+                  </span>
+                  <small>
+                    {run.per_category[label].support} actual records
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="test-results">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">RECORD-LEVEL RESULTS</span>
+                <h2>Ground truth versus classifier</h2>
+              </div>
+            </div>
+            <div className="test-result-head">
+              <span>Email</span>
+              <span>Ground truth</span>
+              <span>Predicted</span>
+              <span>Confidence</span>
+              <span />
+            </div>
+            {run.results
+              .filter((item) => !item.correct)
+              .map((item) => (
+                <button
+                  className="test-result-row"
+                  key={item.email_id}
+                  onClick={() => setSelected(item)}
+                >
+                  <span>
+                    <strong>{item.email_id}</strong>
+                    <small>{item.subject}</small>
+                  </span>
+                  <span>{item.actual}</span>
+                  <span className="result-alert">{item.predicted}</span>
+                  <span>{(item.confidence * 100).toFixed(1)}%</span>
+                  <ChevronRight size={15} />
+                </button>
+              ))}
+            {run.results.every((item) => item.correct) && (
+              <div className="empty-state">
+                <CheckCircle2 size={22} />
+                <strong>No misclassifications</strong>
+              </div>
+            )}
+          </div>
+          {selected && (
+            <div className="test-detail">
+              <button className="icon-button" onClick={() => setSelected(null)}>
+                <X size={16} />
+              </button>
+              <span className="eyebrow">TEST DETAIL</span>
+              <h2>{selected.email_id}</h2>
+              <p>{selected.subject}</p>
+              <div className="test-detail-values">
+                <span>
+                  Ground truth<strong>{selected.actual}</strong>
+                </span>
+                <span>
+                  Predicted<strong>{selected.predicted}</strong>
+                </span>
+                <span>
+                  Score
+                  <strong>{(selected.confidence * 100).toFixed(1)}%</strong>
+                </span>
+                <span>
+                  Path
+                  <strong>
+                    {selected.provider === "spacy"
+                      ? "NLP comparison"
+                      : "LLM fallback"}
+                  </strong>
+                </span>
+              </div>
+              {selected.review_reason && (
+                <p className="reason-copy">{selected.review_reason}</p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 function RunsView({
@@ -1158,13 +1396,6 @@ function RunsView({
   const comparisons = emails.filter(
     (email) => email.category === "Comparison request"
   ).length;
-
-  const [dbRuns, setDbRuns] = useState<any[]>([]);
-  
-  useEffect(() => {
-    api.getRuns().then(setDbRuns).catch(console.error);
-  }, []);
-
   return (
     <section className="page-wrap">
       <div className="page-heading">
@@ -1230,38 +1461,6 @@ function RunsView({
             </span>
           </div>
         ))}
-      </div>
-
-      <div className="run-overview" style={{ marginTop: '32px' }}>
-        <div>
-          <span className="eyebrow">PIPELINE HISTORY</span>
-          <strong>Recent executions from database</strong>
-          <span>Persisted test runs, submissions, and full pipeline runs</span>
-        </div>
-      </div>
-      <div className="run-table">
-        <div className="run-head">
-          <span>Run ID</span>
-          <span>Type</span>
-          <span>Status</span>
-          <span>Emails</span>
-          <span>Score</span>
-        </div>
-        {dbRuns.length === 0 ? (
-          <div className="no-comparison" style={{ padding: '24px' }}>
-            <span style={{ color: '#888' }}>No pipeline history found.</span>
-          </div>
-        ) : (
-          dbRuns.map((run) => (
-            <div className="run-row" key={run.id}>
-              <strong className="mono" style={{ fontSize: '12px' }}>{run.id.split('-')[0]}</strong>
-              <span>{run.run_type.replace('_', ' ')}</span>
-              <span className={run.status === 'failed' ? "result-alert" : ""}>{run.status}</span>
-              <span>{run.email_count ?? "—"}</span>
-              <strong>{run.score !== null ? `${(run.score * 100).toFixed(1)}%` : "—"}</strong>
-            </div>
-          ))
-        )}
       </div>
     </section>
   );

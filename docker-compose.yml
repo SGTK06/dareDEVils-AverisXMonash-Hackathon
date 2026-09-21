@@ -9,7 +9,9 @@
 # To let judges pull labels over HTTP, set REVEAL_GT=1 and a JUDGE_TOKEN.
 services:
   inbox:
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     ports:
       # host 8080 -> container 8000 (8000 often taken locally; change freely)
       - "8080:8000"
@@ -21,6 +23,9 @@ services:
     environment:
       DATA_DIR: /data
       GROUND_TRUTH: /secrets/ground_truth.json
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      CLASSIFIER_MODEL_PATH: /app/models/random_forest_classifier.joblib
+      EMBEDDING_MODEL: /app/models/all-MiniLM-L6-v2
       # REVEAL_GT: "1"            # uncomment to enable GET /ground_truth
       # JUDGE_TOKEN: "change-me"  # and require this token header
     restart: unless-stopped
