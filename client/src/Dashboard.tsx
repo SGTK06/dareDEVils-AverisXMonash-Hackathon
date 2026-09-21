@@ -435,10 +435,6 @@ function InboxView({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50; // Set to 50 emails per page
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [query, filter]);
-
   const totalPages = Math.ceil(list.length / pageSize) || 1;
   const paginatedEmails = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
@@ -514,7 +510,10 @@ function InboxView({
           <input
             id="global-search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setCurrentPage(1);
+              setQuery(event.target.value);
+            }}
             placeholder="Search emails, senders, IDs..."
           />
           <kbd>/</kbd>
@@ -523,9 +522,10 @@ function InboxView({
           <Filter size={15} />
           <select
             value={filter}
-            onChange={(event) =>
-              setFilter(event.target.value as EmailStatus | "All")
-            }
+            onChange={(event) => {
+              setCurrentPage(1);
+              setFilter(event.target.value as EmailStatus | "All");
+            }}
             aria-label="Filter by status"
           >
             <option value="All">All statuses</option>
@@ -678,7 +678,11 @@ function EmailRow({
           className="row-action"
           onClick={(event) => {
             event.stopPropagation();
-            email.status === "Failed" ? onRetry(email.id) : onOpen(email);
+            if (email.status === "Failed") {
+              onRetry(email.id);
+            } else {
+              onOpen(email);
+            }
           }}
           aria-label={
             email.status === "Failed" ? `Retry ${email.id}` : `Open ${email.id}`
