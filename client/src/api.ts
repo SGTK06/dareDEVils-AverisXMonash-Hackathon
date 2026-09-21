@@ -394,11 +394,7 @@ export const api = {
     return toSubmission(merged);
   },
   async submit(submission: Submission) {
-    return request<{
-      score?: number;
-      final_score?: number;
-      [key: string]: unknown;
-    }>("/submit", {
+    return request<EndToEndScore>("/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(submission)
@@ -433,14 +429,27 @@ export type ClassificationTestResult = {
 export type ComparisonTestResult = {
   total: number;
   comparable_total: number;
+  pair_total: number;
   review_total: number;
   status_confusion_matrix: Record<string, Record<string, number>>;
   field_metrics: Record<string, { support: number; precision: number; recall: number; f1: number; exact_accuracy: number }>;
   macro_field: { precision: number; recall: number; f1: number; exact_accuracy: number };
   exact_defect_field_accuracy: number;
+  pair_exact_defect_field_accuracy: number;
   review_precision: number;
   review_recall: number;
   review_f1: number;
   review_reasons: Record<string, { total: number; caught: number }>;
   results: Array<{ email_id: string; subject: string; actual: string; predicted: string; actual_fields: string[]; predicted_fields: string[]; review_reason?: string | null; correct: boolean }>;
+};
+
+export type EndToEndScore = {
+  score?: number;
+  final_score: number;
+  n_emails: number;
+  weights: Record<string, number>;
+  stage1: { accuracy: number; macro_f1: number; rule_pct: number | null };
+  stage3: { defect_precision: number; defect_recall: number; defect_f1: number; field_f1: number; exact_match_rate: number; doc_total: number };
+  reliability: { escalation_precision: number; escalation_recall: number; escalation_f1: number; gold_review: number; pred_review: number };
+  end_to_end: { success: number; total: number; rate: number };
 };

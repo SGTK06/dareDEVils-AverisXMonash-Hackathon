@@ -198,18 +198,38 @@ def run_comparison_test():
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
         return {"precision": precision, "recall": recall, "f1": f1, "support": stats["tp"] + stats["fn"], "exact_accuracy": stats["exact"] / stats["total"] if stats["total"] else 0}
 
-    comparable_count = sum(1 for item in truth.values() if item.get("category") == "BL_COMPARISON" and item.get("status") != "NEEDS_REVIEW")
+    comparable_count = 0
+    pair_count = 0
+    pair_exact = 0
+    for eid, item in truth.items():
+        if item.get("category") != "BL_COMPARISON":
+            continue
+        email = get_email(eid)
+        has_pair = len(email.get("attachments") or []) >= 2
+        if has_pair:
+            pair_count += 1
+        if item.get("status") != "NEEDS_REVIEW":
+            comparable_count += 1
+            if has_pair:
+                prediction = next((row for row in results if row["email_id"] == eid), None)
+                if prediction and set(prediction["actual_fields"]) == set(prediction["predicted_fields"]):
+                    pair_exact += 1
     review_total = sum(item["total"] for item in review_reasons.values())
     review_caught = sum(item["caught"] for item in review_reasons.values())
     predicted_review = sum(item["predicted"] == "NEEDS_REVIEW" for item in results)
     review_precision = review_caught / predicted_review if predicted_review else 0
     review_recall = review_caught / review_total if review_total else 0
     return {
-        "total": len(results), "comparable_total": comparable_count, "review_total": review_total,
+        "total": len(results), "comparable_total": comparable_count, "pair_total": pair_count, "review_total": review_total,
         "status_confusion_matrix": matrix,
         "field_metrics": {field: prf(stats) for field, stats in field_stats.items()},
         "macro_field": {key: sum(metrics[key] for metrics in {field: prf(stats) for field, stats in field_stats.items()}.values()) / len(field_labels) for key in ("precision", "recall", "f1", "exact_accuracy")},
-        "exact_defect_field_accuracy": sum(item["correct"] for item in results if truth[item["email_id"]].get("status") != "NEEDS_REVIEW") / comparable_count if comparable_count else 0,
+        "exact_defect_field_accuracy": sum(
+            set(item["actual_fields"]) == set(item["predicted_fields"])
+            for item in results
+            if truth[item["email_id"]].get("status") != "NEEDS_REVIEW"
+        ) / comparable_count if comparable_count else 0,
+        "pair_exact_defect_field_accuracy": pair_exact / pair_count if pair_count else 0,
         "review_precision": review_precision, "review_recall": review_recall,
         "review_f1": 2 * review_precision * review_recall / (review_precision + review_recall) if review_precision + review_recall else 0,
         "review_reasons": review_reasons, "results": results,
