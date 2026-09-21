@@ -148,6 +148,73 @@ def run_classification_test():
         pass  # DB persistence is best-effort
     return result_payload
 
+
+@app.post("/tests/comparison")
+def run_comparison_test():
+    """Evaluate the comparison pipeline against the v2 ground truth."""
+    truth = _load_ground_truth()
+    comparison_ids = [eid for eid, item in truth.items() if item.get("category") == "BL_COMPARISON"]
+    results = []
+    status_labels = ["OK", "MISMATCH", "NEEDS_REVIEW"]
+    matrix = {actual: {predicted: 0 for predicted in status_labels} for actual in status_labels}
+    field_labels = ["shipper", "consignee", "notify_party", "port_of_loading", "port_of_discharge", "container_count", "gross_weight_kg"]
+    field_stats = {field: {"tp": 0, "fp": 0, "fn": 0, "exact": 0, "total": 0} for field in field_labels}
+    review_reasons = {reason: {"total": 0, "caught": 0} for reason in ["wrong_doc_type", "missing_attachment", "unreadable", "missing_value"]}
+    for email_id in comparison_ids:
+        gold = truth[email_id]
+        prediction = compare_email(email_id, DATA_DIR)
+        actual_status = gold.get("status", "OK")
+        predicted_status = prediction.get("status", "NEEDS_REVIEW")
+        matrix[actual_status][predicted_status] += 1
+        gold_fields = set(gold.get("defect_fields", []))
+        predicted_fields = set(prediction.get("defect_fields", []))
+        comparable = actual_status in {"OK", "MISMATCH"}
+        if comparable:
+            for field in field_labels:
+                gold_bad, predicted_bad = field in gold_fields, field in predicted_fields
+                field_stats[field]["total"] += 1
+                field_stats[field]["exact"] += int(gold_bad == predicted_bad)
+                field_stats[field]["tp"] += int(gold_bad and predicted_bad)
+                field_stats[field]["fp"] += int(not gold_bad and predicted_bad)
+                field_stats[field]["fn"] += int(gold_bad and not predicted_bad)
+        reason = gold.get("review_reason")
+        if actual_status == "NEEDS_REVIEW" and reason in review_reasons:
+            review_reasons[reason]["total"] += 1
+            review_reasons[reason]["caught"] += int(predicted_status == "NEEDS_REVIEW")
+        results.append({
+            "email_id": email_id,
+            "subject": get_email(email_id).get("subject", ""),
+            "actual": actual_status,
+            "predicted": predicted_status,
+            "actual_fields": sorted(gold_fields),
+            "predicted_fields": sorted(predicted_fields),
+            "review_reason": prediction.get("review_reason"),
+            "correct": actual_status == predicted_status and gold_fields == predicted_fields,
+        })
+
+    def prf(stats):
+        precision = stats["tp"] / (stats["tp"] + stats["fp"]) if stats["tp"] + stats["fp"] else 0
+        recall = stats["tp"] / (stats["tp"] + stats["fn"]) if stats["tp"] + stats["fn"] else 0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+        return {"precision": precision, "recall": recall, "f1": f1, "support": stats["tp"] + stats["fn"], "exact_accuracy": stats["exact"] / stats["total"] if stats["total"] else 0}
+
+    comparable_count = sum(1 for item in truth.values() if item.get("category") == "BL_COMPARISON" and item.get("status") != "NEEDS_REVIEW")
+    review_total = sum(item["total"] for item in review_reasons.values())
+    review_caught = sum(item["caught"] for item in review_reasons.values())
+    predicted_review = sum(item["predicted"] == "NEEDS_REVIEW" for item in results)
+    review_precision = review_caught / predicted_review if predicted_review else 0
+    review_recall = review_caught / review_total if review_total else 0
+    return {
+        "total": len(results), "comparable_total": comparable_count, "review_total": review_total,
+        "status_confusion_matrix": matrix,
+        "field_metrics": {field: prf(stats) for field, stats in field_stats.items()},
+        "macro_field": {key: sum(metrics[key] for metrics in {field: prf(stats) for field, stats in field_stats.items()}.values()) / len(field_labels) for key in ("precision", "recall", "f1", "exact_accuracy")},
+        "exact_defect_field_accuracy": sum(item["correct"] for item in results if truth[item["email_id"]].get("status") != "NEEDS_REVIEW") / comparable_count if comparable_count else 0,
+        "review_precision": review_precision, "review_recall": review_recall,
+        "review_f1": 2 * review_precision * review_recall / (review_precision + review_recall) if review_precision + review_recall else 0,
+        "review_reasons": review_reasons, "results": results,
+    }
+
 @app.patch("/classifications/{email_id}")
 def correct_classification(email_id: str, correction: Correction):
     get_email(email_id)

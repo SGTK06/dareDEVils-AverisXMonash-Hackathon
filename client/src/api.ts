@@ -324,6 +324,9 @@ export const api = {
   async runClassificationTest() {
     return request<ClassificationTestResult>("/tests/classification", { method: "POST" });
   },
+  async runComparisonTest() {
+    return request<ComparisonTestResult>("/tests/comparison", { method: "POST" });
+  },
   async listEmails() {
     const raw = await request<RawEmail[]>("/emails");
     const records = raw.map(summary);
@@ -425,4 +428,19 @@ export type ClassificationTestResult = {
   per_category: Record<string, { support: number; precision: number; recall: number; f1: number }>;
   macro: { precision: number; recall: number; f1: number };
   results: Array<{ email_id: string; subject: string; actual: string; predicted: string; confidence: number; provider: string; check_required: boolean; review_reason?: string; correct: boolean }>;
+};
+
+export type ComparisonTestResult = {
+  total: number;
+  comparable_total: number;
+  review_total: number;
+  status_confusion_matrix: Record<string, Record<string, number>>;
+  field_metrics: Record<string, { support: number; precision: number; recall: number; f1: number; exact_accuracy: number }>;
+  macro_field: { precision: number; recall: number; f1: number; exact_accuracy: number };
+  exact_defect_field_accuracy: number;
+  review_precision: number;
+  review_recall: number;
+  review_f1: number;
+  review_reasons: Record<string, { total: number; caught: number }>;
+  results: Array<{ email_id: string; subject: string; actual: string; predicted: string; actual_fields: string[]; predicted_fields: string[]; review_reason?: string | null; correct: boolean }>;
 };
