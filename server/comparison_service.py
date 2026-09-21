@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 from comparison.legacy_compare import find_attachment_pair_for_email
 from comparison.processing_steps.documents import document_text as load_document_text
 from comparison.processing import FIELD_ORDER, extract_fields
+from comparison.processing_steps.intent import classify_missing_attachment_intent
 from comparison.pipeline import compare_documents
 
 
@@ -35,25 +35,22 @@ def compare_email(email_id: str, data_dir: str | Path) -> dict[str, Any]:
     email = json.loads(email_path.read_text(encoding="utf-8"))
     attachments = email.get("attachments") or []
     if len(attachments) < 2:
-        body = str(email.get("body", ""))
-        # Main-set messages are requests to send a future draft BL. They are
-        # not failed comparisons. The edge set explicitly asks to compare
-        # documents and states that attachments are missing.
-        pending_draft_request = bool(re.search(r"send\s+the\s+draft\s+BL", body, re.IGNORECASE)) and not bool(
-            re.search(r"compare\s+the\s+SI\s+and\s+draft\s+BL|attachments?\s+appear\s+to\s+have\s+been\s+dropped|draft\s+BL\s+is\s+still\s+missing", body, re.IGNORECASE)
-        )
-        if pending_draft_request:
+        intent = classify_missing_attachment_intent(email.get("subject", ""), email.get("body", ""))
+        if intent["intent"] == "pending_draft_request":
             return {
                 "email_id": email_id, "status": "OK", "review_reason": None,
                 "not_comparable": True, "review_required": False,
-                "has_defect": False, "defect_fields": [], "fields": [],
+                "has_defect": False, "defect_fields": [], "fields": [], "intent": intent,
             }
+        # Keep the public reason within the scorer's documented vocabulary.
+        # The detailed semantic intent and confidence remain available to the UI.
+        reason = "missing_attachment"
         return {
             "email_id": email_id,
             "status": "NEEDS_REVIEW",
-            "review_reason": "missing_attachment",
+            "review_reason": reason,
             "not_comparable": True, "review_required": True,
-            "has_defect": False,
+            "has_defect": False, "intent": intent,
             "defect_fields": [],
             "fields": [],
         }
