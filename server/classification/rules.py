@@ -38,12 +38,3 @@ def is_standalone_bl_request(text: str) -> bool:
     mentions_si = bool(re.search(r"\bsi\b", lowered)) or "shipping instruction" in lowered
     return mentions_bl and not mentions_si and any(phrase in lowered for phrase in ("draft bl", "amend bl", "confirm bl", "send draft bl", "check draft bl"))
 
-def lexical_scores(text: str) -> dict[str, float]:
-    scores = {category: 0.0 for category in CATEGORIES}
-    for category, patterns in PATTERNS.items():
-        # A direct intent phrase is strong evidence; the classifier still
-        # normalizes competing categories and escalates ambiguous messages.
-        scores[category] = min(1.0, sum(0.90 for pattern in patterns if pattern.search(text)))
-    if not scores["BL_COMPARISON"] and re.search(r"\bSI\b", text, re.I) and re.search(r"\bBL\b|bill of lading", text, re.I):
-        scores["BL_COMPARISON"] = 0.24
-    return scores

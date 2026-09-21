@@ -27,13 +27,18 @@ Environment
 import json
 import os
 from pathlib import Path
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from classification import MailClassifier
-from persistence import save_classification
+from persistence import save_classification, save_classifications_batch, get_classifications_batch, save_comparison, get_comparisons_batch, save_pipeline_run, get_recent_runs
 
 import scoring
 
@@ -64,11 +69,25 @@ def classify_email(email_id: str):
 
 @app.post("/classifications/run")
 def classify_inbox():
+    inbox_emails = _load_inbox()
+    email_ids = [e["email_id"] for e in inbox_emails]
+    cached = get_classifications_batch(email_ids)
+    
     results = []
-    for email in _load_inbox():
-        result = classifier.classify_with_fallback(email).to_dict()
-        save_classification(email["email_id"], {**result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"})
-        results.append({"email_id": email["email_id"], **result})
+    payloads = []
+    for email in inbox_emails:
+        eid = email["email_id"]
+        if eid in cached:
+            results.append(cached[eid])
+        else:
+            result = classifier.classify_with_fallback(email).to_dict()
+            payload = {"email_id": eid, **result, "status": "NEEDS_REVIEW" if result["check_required"] else "CLASSIFIED"}
+            payloads.append(payload)
+            results.append(payload)
+            
+    if payloads:
+        save_classifications_batch(payloads)
+        
     return {"count": len(results), "results": results}
 
 @app.post("/tests/classification")
@@ -94,7 +113,20 @@ def run_classification_test():
         recall = tp / (tp + fn) if tp + fn else 0
         per_category[label] = {"support": sum(matrix[label].values()), "precision": precision, "recall": recall, "f1": 2 * precision * recall / (precision + recall) if precision + recall else 0}
     macro = {key: sum(item[key] for item in per_category.values()) / len(TEST_CATEGORIES) for key in ("precision", "recall", "f1")}
-    return {"total": total, "correct": sum(item["correct"] for item in results), "accuracy": sum(item["correct"] for item in results) / total if total else 0, "review_count": sum(item["check_required"] for item in results), "confusion_matrix": matrix, "per_category": per_category, "macro": macro, "results": results}
+    result_payload = {"total": total, "correct": sum(item["correct"] for item in results), "accuracy": sum(item["correct"] for item in results) / total if total else 0, "review_count": sum(item["check_required"] for item in results), "confusion_matrix": matrix, "per_category": per_category, "macro": macro, "results": results}
+    # Persist test run to database
+    try:
+        run_id = save_pipeline_run(
+            run_type="classification_test",
+            config={"categories": TEST_CATEGORIES},
+            results=result_payload,
+            score=result_payload["accuracy"],
+            email_count=total,
+        )
+        result_payload["run_id"] = run_id
+    except Exception:
+        pass  # DB persistence is best-effort
+    return result_payload
 
 @app.patch("/classifications/{email_id}")
 def correct_classification(email_id: str, correction: Correction):
@@ -104,6 +136,41 @@ def correct_classification(email_id: str, correction: Correction):
         payload["category"] = correction.category
     save_classification(email_id, payload)
     return {"email_id": email_id, **payload}
+
+
+# --------------------------------------------------------------------------
+# comparison persistence
+# --------------------------------------------------------------------------
+@app.post("/comparisons/{email_id}")
+def persist_comparison(email_id: str, request_body: dict):
+    """Save a comparison result for an email."""
+    get_email(email_id)  # validate email exists
+    save_comparison(
+        email_id=email_id,
+        fields=request_body.get("fields", []),
+        status=request_body.get("status", "CLASSIFIED"),
+        result_text=request_body.get("result_text"),
+        reason=request_body.get("reason"),
+    )
+    return {"email_id": email_id, "persisted": True}
+
+
+@app.get("/comparisons/batch")
+def batch_comparisons(ids: str = ""):
+    """Fetch cached comparison results. Pass comma-separated email IDs."""
+    if not ids:
+        return {}
+    email_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
+    return get_comparisons_batch(email_ids)
+
+
+# --------------------------------------------------------------------------
+# pipeline run history
+# --------------------------------------------------------------------------
+@app.get("/runs")
+def list_runs(run_type: str | None = None, limit: int = 20):
+    """Return recent pipeline runs from Supabase."""
+    return get_recent_runs(run_type=run_type, limit=limit)
 
 
 # --------------------------------------------------------------------------

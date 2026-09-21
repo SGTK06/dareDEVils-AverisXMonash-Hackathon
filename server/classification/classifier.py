@@ -31,13 +31,7 @@ class MailClassifier:
         document = nlp(text)
         similarities = {label: float(document.similarity(category_doc)) for label, category_doc in category_docs.items()}
         lexical = lexical_scores(text)
-        if not has_bl_si_comparison(text):
-            lexical["BL_COMPARISON"] = 0.0
         combined = {label: similarities[label] + lexical[label] for label in CATEGORIES}
-        if not has_bl_si_comparison(text):
-            combined["BL_COMPARISON"] = -1e6
-        if is_standalone_bl_request(text):
-            combined["GENERAL"] = max(combined.values()) + 1.0
         category = max(combined, key=combined.get)
         confidence = similarities[category]
         return ClassificationResult(category, confidence, similarities, confidence < self.config.review_threshold, "low_spacy_similarity" if confidence < self.config.review_threshold else None, "spacy")
