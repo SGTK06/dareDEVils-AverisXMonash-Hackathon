@@ -264,6 +264,32 @@ def correct_classification(email_id: str, correction: Correction):
 # --------------------------------------------------------------------------
 # comparison persistence
 # --------------------------------------------------------------------------
+class FieldOverride(BaseModel):
+    field_name: str
+    corrected_value: str
+    document_type: str  # "si" or "bl"
+
+from persistence import save_field_override
+
+@app.patch("/comparisons/{email_id}/fields")
+def update_field_and_rerun(email_id: str, override: FieldOverride):
+    """Save a human-in-the-loop field correction and re-run the comparison."""
+    get_email(email_id)
+    save_field_override(email_id, override.document_type, override.field_name, override.corrected_value)
+    
+    # Re-run comparison with the new override applied
+    result = compare_email(email_id, DATA_DIR)
+    
+    # Persist the updated result
+    save_comparison(
+        email_id=email_id,
+        fields=result.get("fields", []),
+        status=result.get("status", "CLASSIFIED"),
+        result_text=result.get("result_text"),
+        reason=result.get("review_reason")
+    )
+    return result
+
 @app.get("/comparisons/batch")
 def get_comparisons_batch_endpoint(ids: str):
     """Fetch cached comparisons for a batch of emails."""

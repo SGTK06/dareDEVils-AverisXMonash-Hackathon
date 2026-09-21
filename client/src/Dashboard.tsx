@@ -228,7 +228,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
           <span className="health-dot" />
           Pipeline healthy <span className="health-time">2m ago</span>
         </div>
-        <button className="nav-button muted">
+        <button className="nav-button muted" onClick={() => notify("Settings coming soon!")}>
           <Settings2 size={16} /> Settings
         </button>
 
@@ -382,7 +382,10 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
           </>
         )}
         {!loading && !loadError && view === "review" && (
-          <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} />
+          <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} onRefresh={() => {
+            api.listEmails().then(setEmails);
+            notify("Review queue refreshed");
+          }} />
         )}
         {!loading && !loadError && view === "runs" && (
           <RunsView onNotify={notify} />
@@ -561,7 +564,7 @@ function InboxView({
             <option>Failed</option>
             <option>Classified</option>
           </select>
-          <button className="button button-quiet">
+          <button className="button button-quiet" onClick={() => notify("Advanced filtering coming soon!")}>
             <Filter size={14} /> More filters
           </button>
         </div>
@@ -739,7 +742,7 @@ function DetailView({
   const meta = statusMeta[email.status];
   const fields = email.fields ?? [];
   const [edited, setEdited] = useState<Record<string, string>>({});
-  const reviewRequired = email.status === "Needs review" || email.checkRequired;
+  const reviewRequired = email.status === "Needs review" || email.status === "Mismatch" || email.checkRequired;
   const processingLabel =
     email.classificationProvider === "gemini"
       ? "LLM fallback"
@@ -755,11 +758,11 @@ function DetailView({
           <ArrowLeft size={16} /> Back to inbox
         </button>
         <div className="detail-actions">
-          <button className="button button-quiet">
+          <button className="button button-quiet" onClick={() => {
+            navigator.clipboard.writeText(email.id);
+            onNotify("ID copied to clipboard");
+          }}>
             <Clipboard size={14} /> Copy ID
-          </button>
-          <button className="button button-quiet">
-            <MoreHorizontal size={15} />
           </button>
         </div>
       </div>
@@ -818,7 +821,7 @@ function DetailView({
                     <strong>{file}</strong>
                     <span>Attachment available from inbox</span>
                   </div>
-                  <button className="icon-button" aria-label={`View ${file}`}>
+                  <button className="icon-button" aria-label={`View ${file}`} onClick={() => window.open(`http://localhost:8000/attachments/${file}`, "_blank")}>
                     <PanelRight size={15} />
                   </button>
                 </div>
@@ -896,7 +899,15 @@ function DetailView({
                     : (email.reason ?? email.result)}
               </p>
             </div>
-            <button className="button button-quiet">
+            <button className="button button-quiet" onClick={() => {
+              const blob = new Blob([JSON.stringify(email, null, 2)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${email.id}_evidence.json`;
+              a.click();
+              onNotify("Evidence downloaded");
+            }}>
               <Download size={14} /> Download evidence
             </button>
           </div>
@@ -991,8 +1002,21 @@ function DetailView({
               <button
                 className="button button-primary"
                 onClick={async () => {
-                  await api.correct(email.id, edited);
-                  onNotify("Correction saved and review resolved");
+                  if (email.category === "Comparison request") {
+                    await api.correctComparison(email.id, edited);
+                    const updatedEmail = await api.getEmail(email.id);
+                    onNotify("Comparison field override saved and verified");
+                    // Assuming onBack or an onReload prop exists to refresh the UI, 
+                    // but we can just let React handle it if we trigger a parent reload.
+                    // Instead of a full reload, we can trigger re-fetch by doing:
+                    // Actually, Dashboard relies on polling or manual re-render, 
+                    // but since api.ts mutates cache, we might need a way to refresh it.
+                    // The easiest way is to close the detail view.
+                    onBack();
+                  } else {
+                    await api.correct(email.id, edited);
+                    onNotify("Correction saved and review resolved");
+                  }
                 }}
               >
                 Save correction
@@ -1119,6 +1143,7 @@ function ReviewView({
   emails: EmailRecord[];
   onOpen: (email: EmailRecord) => void;
   onNotify: (message: string) => void;
+  onRefresh: () => void;
 }) {
   const reviewEmails = emails.filter(
     (email) => email.status === "Needs review"
@@ -1132,7 +1157,7 @@ function ReviewView({
         </div>
         <button
           className="button button-primary"
-          onClick={() => onNotify("Review queue is up to date")}
+          onClick={onRefresh}
         >
           <RefreshCw size={15} /> Refresh queue
         </button>

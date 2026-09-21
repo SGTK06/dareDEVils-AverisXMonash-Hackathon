@@ -382,6 +382,27 @@ export const api = {
     if (current) { const updated = { ...current, status: "Classified" as EmailStatus, result: "Review resolved", checkRequired: false }; cache.set(id, updated); return updated; }
     return this.getEmail(id);
   },
+  async correctComparison(id: string, edits: Record<string, string>) {
+    // edits has format { "shipper_si": "value", "shipper_bl": "value" }
+    for (const [key, value] of Object.entries(edits)) {
+      const parts = key.split("_");
+      const docType = parts.pop() as "si" | "bl";
+      const fieldName = parts.join("_");
+      
+      await request(`/comparisons/${encodeURIComponent(id)}/fields`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          field_name: fieldName,
+          corrected_value: value,
+          document_type: docType
+        })
+      });
+    }
+    // Bust cache by deleting it
+    cache.delete(id);
+    return this.getEmail(id);
+  },
   async retry(id: string) {
     return this.getEmail(id);
   },
