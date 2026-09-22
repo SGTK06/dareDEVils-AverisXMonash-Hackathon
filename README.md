@@ -143,13 +143,16 @@ Every field comparison resolves to a verdict backed by an explicit reason (evide
                                     ▼
 ┌───────────────────────────────────────────────────────────────────┐
 │         STATUS: OK / MISMATCH / NEEDS_REVIEW (React client)        │
-│                  persisted to Supabase when configured             │
+│     comparison/classification persisted to Supabase; field          │
+│     overrides stored locally in data_v2/overrides.json              │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 **Client/server split:** the React client (`/client`) is the operator-facing review workspace; the FastAPI server (`/server`) exposes classification and comparison as API endpoints (`server/app.py`) and coordinates the pipeline (`comparison_service.py`, `classification/`, `comparison/`).
 
 **Note:** `server/ingest/llama_parse.py` (LlamaParse-based document parsing) and `server/llm/gemini.py`'s `extract_with_gemini` (LLM-based field extraction) exist as separate, available modules but are not currently wired into the live `compare_email` flow — extraction there is done via local document parsing + alias matching, and Gemini is only called to verify already-flagged mismatches.
+
+`server/comparison/legacy_compare.py` and `legacy_item_compare.py` are an older, standalone comparison implementation (includes cosine-similarity-based item/feature/unit comparison for a `description_of_goods` field). Only one function from `legacy_compare.py` — `find_attachment_pair_for_email` (locates the SI/BL attachment files for an email) — is actually imported and used by the live `comparison_service.py`. The rest of that module, and all of `legacy_item_compare.py`, is unused by the live app and only runnable as a standalone CLI script.
 
 ---
 
@@ -258,7 +261,7 @@ Comparison, by contrast, is handled deterministically wherever possible (exact m
 - Docker (optional, for the container workflow)
 - A Gemini API key (`GEMINI_API_KEY`) — used for mismatch verification and available for classification/extraction fallback
 - A LlamaParse API key (`LLAMA_CLOUD_API_KEY`) — only needed if the LlamaParse ingest path is enabled
-- Supabase project URL + key — for persistence (the client talks to Supabase directly via `@supabase/supabase-js`)
+- A Supabase project (`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` on the server, `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` on the client) — the server uses direct Supabase REST calls to persist classifications, comparisons, and pipeline runs; the client uses Supabase only for operator login/session (`@supabase/supabase-js` auth)
 
 ### Installation
 
@@ -279,8 +282,17 @@ Create `server/.env` (or `.env.local` for the LlamaParse/Gemini modules) with:
 ```bash
 GEMINI_API_KEY=your_gemini_key
 LLAMA_CLOUD_API_KEY=your_llama_cloud_key   # only if using server/ingest/llama_parse.py
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 DATA_DIR=/path/to/data_v2                  # defaults to /data
 CLASSIFIER_REVIEW_THRESHOLD=0.80           # optional override
+```
+
+Create `client/.env.local` with:
+
+```bash
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 **Client (React + Vite):**
@@ -374,8 +386,8 @@ dareDEVils-AverisXMonash-Hackathon/
 │   │   └── config.py            # thresholds, model paths (env-overridable)
 │   ├── comparison/
 │   │   ├── pipeline.py          # compare_documents() — runs process_field per field
-│   │   ├── legacy_compare.py    # attachment pairing (find_attachment_pair_for_email)
-│   │   ├── legacy_item_compare.py
+│   │   ├── legacy_compare.py    # only find_attachment_pair_for_email is used live; rest is a standalone CLI (unused by the app)
+│   │   ├── legacy_item_compare.py  # cosine-similarity item/feature/unit comparison — unused by the live app
 │   │   ├── processing/
 │   │   │   ├── extractor.py     # alias table + extract_fields()
 │   │   │   └── fields.py        # process_field() — entity/port/numeric comparison logic
@@ -389,7 +401,7 @@ dareDEVils-AverisXMonash-Hackathon/
 │   ├── llm/
 │   │   ├── classification.py    # verify_classification() — Gemini classification check
 │   │   └── gemini.py            # extract_with_gemini(), verify_discrepancy() (used for mismatch verification)
-│   ├── persistence.py           # Supabase persistence layer
+│   ├── persistence.py           # Supabase REST persistence (classifications, comparisons, pipeline runs) + local overrides.json for HITL field corrections
 │   ├── comparison_service.py    # compare_email() — orchestrates parse → extract → compare → verify
 │   ├── scoring.py                # hackathon submission scoring
 │   ├── score_cli.py             # CLI batch scoring tool
@@ -479,7 +491,7 @@ dareDEVils-AverisXMonash-Hackathon/
 
 **Frontend:** React 19 · Vite · TypeScript · Tailwind CSS · lucide-react
 
-**Persistence:** Supabase (Postgres + client SDK)
+**Persistence:** Supabase — server persists classifications, comparisons, and pipeline runs via direct REST calls (`httpx` + `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`); client uses `@supabase/supabase-js` only for operator authentication; human-in-the-loop field overrides are stored locally in `data_v2/overrides.json`, not Supabase
 
 **Deployment:** Docker · Google Cloud Run · Render (client) · GitHub Actions (CI)
 
