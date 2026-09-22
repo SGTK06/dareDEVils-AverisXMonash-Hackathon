@@ -67,7 +67,7 @@
 └──────────────┴──────────────┴──────────────────┘
 ```
 
----
+**Link:** https://daredevils-averisxmonash-hackathon.onrender.com/
 
 ## Table of Contents
 
@@ -77,9 +77,9 @@
 - [Features](#features)
 - [Architecture](#architecture)
 - [How It Works](#how-it-works)
-  * [Classification: Text to Category](#classification-text-to-category)
-  * [Extraction: Document to Fields](#extraction-document-to-fields)
-  * [Comparison: Finding Hidden Discrepancies](#comparison-finding-hidden-discrepancies)
+  - [Classification: Text to Category](#classification-text-to-category)
+  - [Extraction: Document to Fields](#extraction-document-to-fields)
+  - [Comparison: Finding Hidden Discrepancies](#comparison-finding-hidden-discrepancies)
 - [Model Selection](#model-selection)
 - [Quick Start](#quick-start)
 - [Project Structure](#project-structure)
@@ -127,33 +127,43 @@ Every field comparison resolves to a verdict backed by an explicit reason (evide
 
 ## Use Cases
 
-| Use Case | What Operum Provides |
-| --- | --- |
-| **Inbox triage** | Every inbound email is classified into BL comparison, SI request, invoice query, general, or spam — before a human opens it. |
-| **SI vs draft BL comparison** | Shipper, consignee, notify party, port of loading, port of discharge, container count, and gross weight are automatically cross-checked between the two documents. |
-| **Named entity comparison** | Company names (shipper/consignee/notify party) are normalized, stripped of legal-entity suffixes and address noise, and compared by token set and Levenshtein similarity rather than exact string match. |
-| **Port comparison** | Ports are compared by UN/LOCODE when present, falling back to normalized port name matching when no code is available. |
-| **Unit-safe numeric comparison** | Gross weight values in different units (KG, G, LB, TON) are converted to a common unit before comparison so equivalent values are never flagged as mismatches. |
-| **LLM-verified mismatches** | Every field flagged as a mismatch is re-checked by Gemini before being reported, catching false positives the deterministic rules miss. |
-| **Human-in-the-loop correction** | Operators can override extracted field values per email; overrides are applied before comparison re-runs, and corrections are persisted. |
+| Use Case                         | What Operum Provides                                                                                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Inbox triage**                 | Every inbound email is classified into BL comparison, SI request, invoice query, general, or spam — before a human opens it.                                                                             |
+| **SI vs draft BL comparison**    | Shipper, consignee, notify party, port of loading, port of discharge, container count, and gross weight are automatically cross-checked between the two documents.                                       |
+| **Named entity comparison**      | Company names (shipper/consignee/notify party) are normalized, stripped of legal-entity suffixes and address noise, and compared by token set and Levenshtein similarity rather than exact string match. |
+| **Port comparison**              | Ports are compared by UN/LOCODE when present, falling back to normalized port name matching when no code is available.                                                                                   |
+| **Unit-safe numeric comparison** | Gross weight values in different units (KG, G, LB, TON) are converted to a common unit before comparison so equivalent values are never flagged as mismatches.                                           |
+| **LLM-verified mismatches**      | Every field flagged as a mismatch is re-checked by Gemini before being reported, catching false positives the deterministic rules miss.                                                                  |
+| **Human-in-the-loop correction** | Operators can override extracted field values per email; overrides are applied before comparison re-runs, and corrections are persisted.                                                                 |
 
 ---
 
 ## Features
 
-| Feature | Description |
-| --- | --- |
+| Feature                             | Description                                                                                                                                                    |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Two-stage intent classification** | Sentence embeddings (`all-MiniLM-L6-v2`) + a pre-trained Random Forest classifier determine mail intent; confidence below threshold is flagged `NEEDS_REVIEW`. |
-| **Filetype-aware document parsing** | `.txt`/`.csv` read directly, `.xlsx` via pandas, `.docx` via python-docx, `.pdf` via pypdf text extraction. |
-| **Alias-based field extraction** | A fixed alias table maps differently-worded document labels (e.g. "Load Port", "POL", "Port of Loading") to the same canonical field. |
-| **Cascading field comparison** | Case-insensitive exact match first; only genuinely different values proceed to entity/port/numeric-specific comparison logic. |
-| **Unit and code normalization** | Numeric fields are unit-converted before comparison; ports are matched on UN/LOCODE when available. |
-| **Gemini-verified mismatches** | Every MISMATCH verdict is re-checked by Gemini, which can downgrade a false-positive mismatch back to a match with an explanation. |
-| **Auditable human correction loop** | Field-level operator overrides are applied before re-comparison and persisted to Supabase. |
+| **Filetype-aware document parsing** | `.txt`/`.csv` read directly, `.xlsx` via pandas, `.docx` via python-docx, `.pdf` via pypdf text extraction.                                                    |
+| **Alias-based field extraction**    | A fixed alias table maps differently-worded document labels (e.g. "Load Port", "POL", "Port of Loading") to the same canonical field.                          |
+| **Cascading field comparison**      | Case-insensitive exact match first; only genuinely different values proceed to entity/port/numeric-specific comparison logic.                                  |
+| **Unit and code normalization**     | Numeric fields are unit-converted before comparison; ports are matched on UN/LOCODE when available.                                                            |
+| **Gemini-verified mismatches**      | Every MISMATCH verdict is re-checked by Gemini, which can downgrade a false-positive mismatch back to a match with an explanation.                             |
+| **Auditable human correction loop** | Field-level operator overrides are applied before re-comparison and persisted to Supabase.                                                                     |
 
 ---
 
 ## Architecture
+
+### Classification architecture
+
+![Operum classification architecture](architecture/classification.png)
+
+### Comparison architecture
+
+![Operum comparison architecture](architecture/comparison.png)
+
+The diagrams above show the live classification and document-comparison flows, including the API, processing stages, confidence-based review routing, and human correction loop.
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
@@ -254,31 +264,6 @@ The alias table recognizes multiple real-world labels for the same field — e.g
 
 ### Comparison: Finding Hidden Discrepancies
 
-```mermaid
-flowchart TD
-    Start([SI field + BL field]) --> Fast{Case-insensitive exact match?}
-    Fast -->|Yes| Match([MATCH])
-    Fast -->|No| Type{Field type}
-    Type -->|"Entity: shipper, consignee, notify_party"| Ent["Normalize, strip legal suffixes/address noise, compare token sets"]
-    Ent -->|tokens differ| Lev[Levenshtein similarity]
-    Lev -->|">= 0.85"| Review1([REVIEW])
-    Lev -->|"< 0.85"| Mismatch1([MISMATCH])
-    Type -->|Port| Port{"Both have UN/LOCODE?"}
-    Port -->|Yes| PortCode{"Code + name both match?"}
-    PortCode -->|Yes| Match
-    PortCode -->|No| Mismatch2([MISMATCH])
-    Port -->|No| Ent
-    Type -->|"Numeric: container_count, gross_weight_kg"| Num["Parse number + unit, convert to common unit"]
-    Num -->|equal| Match
-    Num -->|differ| Mismatch3([MISMATCH])
-    Num -->|unparseable| Review2([REVIEW])
-    Mismatch1 --> Gemini["Gemini verifies the flagged mismatch"]
-    Mismatch2 --> Gemini
-    Mismatch3 --> Gemini
-    Gemini -->|confirms genuine| FinalMismatch([Reported: MISMATCH])
-    Gemini -->|false positive| FinalMatch([Downgraded: MATCH])
-```
-
 Missing values on either side never resolve to a verdict directly — they're marked `REVIEW`. If any field needs review, the email's overall status is `NEEDS_REVIEW`; otherwise it's `MISMATCH` if any field mismatched, or `OK`.
 
 ---
@@ -287,11 +272,11 @@ Missing values on either side never resolve to a verdict directly — they're ma
 
 The classification model needs to be fast enough to process an inbox without noticeable delay, while accurate enough to avoid misclassification.
 
-| Option | Trade-off |
-| --- | --- |
-| **Embedding cosine similarity comparison** | Low accuracy, higher margin of error |
-| **Random Forest Classifier (chosen)** | Optimal sweet spot — low compute power, high accuracy |
-| **Direct LLM query** | High accuracy, but higher compute power and latency |
+| Option                                     | Trade-off                                             |
+| ------------------------------------------ | ----------------------------------------------------- |
+| **Embedding cosine similarity comparison** | Low accuracy, higher margin of error                  |
+| **Random Forest Classifier (chosen)**      | Optimal sweet spot — low compute power, high accuracy |
+| **Direct LLM query**                       | High accuracy, but higher compute power and latency   |
 
 **Trade-off accepted:** the Random Forest model must be trained on a labeled subset of the dataset, so new categories can't be added without retraining. In exchange, the model trains fast and adds no inference-time cost compared to a Deep Learning approach.
 
@@ -332,7 +317,7 @@ LLAMA_CLOUD_API_KEY=your_llama_cloud_key   # only if using server/ingest/llama_p
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 DATA_DIR=/path/to/data_v2                  # defaults to /data
-CLASSIFIER_REVIEW_THRESHOLD=0.80           # optional override
+CLASSIFIER_REVIEW_THRESHOLD=0.65           # optional override
 ```
 
 Create `client/.env.local` with:
@@ -498,15 +483,15 @@ dareDEVils-AverisXMonash-Hackathon/
 
 ## Comparison Fields Reference
 
-| Field | Comparison Method | Notes |
-| --- | --- | --- |
-| Shipper | Exact match → entity normalization → Levenshtein | Legal-entity suffixes (LTD, SDN BHD, INC, etc.) and address noise are stripped before comparison |
-| Consignee | Exact match → entity normalization → Levenshtein | Same entity logic as shipper |
-| Notify Party | Exact match → entity normalization → Levenshtein | Same entity logic as shipper |
-| Port of Loading | UN/LOCODE match → entity fallback | Falls back to normalized port-name comparison when no 5-letter code is present |
-| Port of Discharge | UN/LOCODE match → entity fallback | Same as port of loading |
-| Container Count | Numeric parse (unit-aware) | Extracts the count preceding units like "X", "PCS", "CONTAINERS" |
-| Gross Weight (kg) | Numeric parse + unit conversion | KG, G, LB, LBS, TON/TONS all normalized to a common unit before comparing |
+| Field             | Comparison Method                                | Notes                                                                                            |
+| ----------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Shipper           | Exact match → entity normalization → Levenshtein | Legal-entity suffixes (LTD, SDN BHD, INC, etc.) and address noise are stripped before comparison |
+| Consignee         | Exact match → entity normalization → Levenshtein | Same entity logic as shipper                                                                     |
+| Notify Party      | Exact match → entity normalization → Levenshtein | Same entity logic as shipper                                                                     |
+| Port of Loading   | UN/LOCODE match → entity fallback                | Falls back to normalized port-name comparison when no 5-letter code is present                   |
+| Port of Discharge | UN/LOCODE match → entity fallback                | Same as port of loading                                                                          |
+| Container Count   | Numeric parse (unit-aware)                       | Extracts the count preceding units like "X", "PCS", "CONTAINERS"                                 |
+| Gross Weight (kg) | Numeric parse + unit conversion                  | KG, G, LB, LBS, TON/TONS all normalized to a common unit before comparing                        |
 
 **Escalation policy:** missing values, unreadable documents, and missing attachment pairs always resolve to `NEEDS_REVIEW`. A flagged `MISMATCH` is re-checked by Gemini before being finalized, and can be downgraded to a match if Gemini determines it's a false positive.
 
@@ -514,15 +499,15 @@ dareDEVils-AverisXMonash-Hackathon/
 
 ## Reliability Model
 
-| Layer | Protection |
-| --- | --- |
-| **Fast-path exact match** | Case and whitespace differences alone never trigger a discrepancy — checked before any field-specific logic runs. |
-| **Unit-safe numeric comparison** | Values are converted to a common unit before comparison so equivalent quantities in different units are never flagged as mismatches. |
-| **UN/LOCODE-aware port matching** | Ports are compared by code when available, avoiding false mismatches from differently-worded but identical port names. |
-| **Never-guess policy** | Missing values, missing attachments, and unreadable documents always resolve to `NEEDS_REVIEW`, never an auto-resolved decision. |
-| **Gemini-verified mismatches** | Every deterministic MISMATCH verdict is re-checked by an LLM before being reported, reducing false positives. |
-| **Auditable correction loop** | Every operator override is applied explicitly and persisted — never silently overwritten. |
-| **Evidence-backed decisions** | Every field verdict carries a `note`/evidence string explaining why it matched, mismatched, or needs review. |
+| Layer                             | Protection                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Fast-path exact match**         | Case and whitespace differences alone never trigger a discrepancy — checked before any field-specific logic runs.                    |
+| **Unit-safe numeric comparison**  | Values are converted to a common unit before comparison so equivalent quantities in different units are never flagged as mismatches. |
+| **UN/LOCODE-aware port matching** | Ports are compared by code when available, avoiding false mismatches from differently-worded but identical port names.               |
+| **Never-guess policy**            | Missing values, missing attachments, and unreadable documents always resolve to `NEEDS_REVIEW`, never an auto-resolved decision.     |
+| **Gemini-verified mismatches**    | Every deterministic MISMATCH verdict is re-checked by an LLM before being reported, reducing false positives.                        |
+| **Auditable correction loop**     | Every operator override is applied explicitly and persisted — never silently overwritten.                                            |
+| **Evidence-backed decisions**     | Every field verdict carries a `note`/evidence string explaining why it matched, mismatched, or needs review.                         |
 
 ---
 
