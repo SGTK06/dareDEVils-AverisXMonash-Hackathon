@@ -4,7 +4,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ClassificationConfig:
-    review_threshold: float = 0.80
+    review_threshold: float = 0.65
     temperature: float = 0.15
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
