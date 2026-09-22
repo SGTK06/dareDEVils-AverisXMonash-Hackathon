@@ -198,34 +198,25 @@ The alias table recognizes multiple real-world labels for the same field — e.g
 
 ### Comparison: Finding Hidden Discrepancies
 
-```
+```mermaid
 flowchart TD
-    Start([SI field + BL field]) --> Fast{Case-insensitive
-exact match?}
+    Start([SI field + BL field]) --> Fast{Case-insensitive exact match?}
     Fast -->|Yes| Match([MATCH])
     Fast -->|No| Type{Field type}
-    Type -->|Entity: shipper,
-consignee, notify_party| Ent[Normalize, strip legal
-suffixes/address noise,
-compare token sets]
+    Type -->|"Entity: shipper, consignee, notify_party"| Ent["Normalize, strip legal suffixes/address noise, compare token sets"]
     Ent -->|tokens differ| Lev[Levenshtein similarity]
-    Lev -->|>= 0.85| Review1([REVIEW])
-    Lev -->|< 0.85| Mismatch1([MISMATCH])
-    Type -->|Port| Port{Both have
-UN/LOCODE?}
-    Port -->|Yes| PortCode{Code + name
-both match?}
+    Lev -->|">= 0.85"| Review1([REVIEW])
+    Lev -->|"< 0.85"| Mismatch1([MISMATCH])
+    Type -->|Port| Port{"Both have UN/LOCODE?"}
+    Port -->|Yes| PortCode{"Code + name both match?"}
     PortCode -->|Yes| Match
     PortCode -->|No| Mismatch2([MISMATCH])
     Port -->|No| Ent
-    Type -->|Numeric: container_count,
-gross_weight_kg| Num[Parse number + unit,
-convert to common unit]
+    Type -->|"Numeric: container_count, gross_weight_kg"| Num["Parse number + unit, convert to common unit"]
     Num -->|equal| Match
     Num -->|differ| Mismatch3([MISMATCH])
     Num -->|unparseable| Review2([REVIEW])
-    Mismatch1 --> Gemini[Gemini verifies
-the flagged mismatch]
+    Mismatch1 --> Gemini["Gemini verifies the flagged mismatch"]
     Mismatch2 --> Gemini
     Mismatch3 --> Gemini
     Gemini -->|confirms genuine| FinalMismatch([Reported: MISMATCH])
