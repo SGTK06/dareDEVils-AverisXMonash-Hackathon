@@ -46,11 +46,21 @@ Shipping operations teams triage a shared inbox where every email could be a Shi
 Operum layers cheap, deterministic checks first and only escalates to an LLM when a check flags something worth double-checking.
 
 ```
-mail arrives → classify intent (embeddings + Random Forest) →
-   (if BL comparison) parse both documents → extract known fields by label →
-   apply any human-in-the-loop overrides → compare each field with the
-   applicable deterministic method → verify flagged mismatches with Gemini →
-   status: OK / MISMATCH / NEEDS_REVIEW
+mail arrives
+    ↓
+classify intent (embeddings + Random Forest)
+    ↓
+(if BL comparison) parse both documents
+    ↓
+extract known fields by label
+    ↓
+apply any human-in-the-loop overrides
+    ↓
+compare each field with the applicable deterministic method
+    ↓
+verify flagged mismatches with Gemini
+    ↓
+status: OK / MISMATCH / NEEDS_REVIEW
 ```
 
 Every field comparison resolves to a verdict backed by an explicit reason (evidence). A mismatch is never auto-reported without a Gemini sanity-check first, and a missing, unreadable, or ambiguous value never becomes a guessed match or mismatch — it becomes `NEEDS_REVIEW`.
