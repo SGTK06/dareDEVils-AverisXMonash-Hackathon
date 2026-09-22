@@ -206,6 +206,7 @@ async function processEmail(
   try {
     const comparison = await request<{
       status: "OK" | "MISMATCH" | "NEEDS_REVIEW";
+      not_comparable?: boolean;
       review_reason?: string | null;
       fields?: Array<{ field: string; si: string; bl: string; result: "match" | "mismatch" | "review"; confidence: number; evidence: string }>;
     }>(`/comparisons/${encodeURIComponent(raw.email_id)}`);
@@ -218,8 +219,10 @@ async function processEmail(
     return {
       ...record,
       fields,
-      status: comparison.status === "MISMATCH" ? "Mismatch" : comparison.status === "OK" ? "Match" : "Needs review",
-      result: comparison.status === "MISMATCH"
+      status: comparison.not_comparable ? "Classified" : comparison.status === "MISMATCH" ? "Mismatch" : comparison.status === "OK" ? "Match" : "Needs review",
+      result: comparison.not_comparable
+        ? "Awaiting draft BL"
+        : comparison.status === "MISMATCH"
         ? `${mismatches.length} field${mismatches.length === 1 ? "" : "s"} differ`
         : comparison.status === "OK" ? "No mismatch detected" : `${review.length || 1} field${review.length === 1 ? "" : "s"} need review`,
       reason: comparison.review_reason ?? undefined,

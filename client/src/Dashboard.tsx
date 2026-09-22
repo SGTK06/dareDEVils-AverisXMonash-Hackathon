@@ -23,7 +23,6 @@ import {
   Search,
   Send,
   Settings2,
-  ShieldCheck,
   Sun,
   Upload,
   X,
@@ -89,7 +88,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("theme", dark ? "dark" : "light");
-    
+
     if (prefsLoaded) {
       savePreferencesDebounced(userId, {
         theme: dark ? "dark" : "light",
@@ -158,9 +157,9 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">
-            <ShieldCheck size={17} />
+            <img className="operum-mark" src="/operum.png" alt="" aria-hidden="true" />
           </div>
-          <span>operum</span>
+          <span>Operum</span>
           <button
             className="icon-button mobile-close"
             onClick={() => setMobileNav(false)}
@@ -1596,7 +1595,7 @@ function RunsView({
           <RefreshCw size={15} /> Refresh
         </button>
       </div>
-      
+
       <div className="run-table">
         <div className="run-head" style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
           <span>Run Type</span>
