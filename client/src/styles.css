@@ -131,13 +131,22 @@ tr:focus-visible {
   letter-spacing: -0.02em;
 }
 .brand-mark {
-  width: 23px;
-  height: 23px;
-  border-radius: 6px;
-  background: var(--text);
-  color: var(--bg);
+  width: 26px;
+  height: 26px;
+  margin-left: -2px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface);
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
+}
+.operum-mark {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 50%;
 }
 .workspace-label,
 .eyebrow,

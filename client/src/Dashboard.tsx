@@ -24,7 +24,6 @@ import {
   Search,
   Send,
   Settings2,
-  ShieldCheck,
   Sun,
   Upload,
   X,
@@ -155,9 +154,9 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">
-            <ShieldCheck size={17} />
+            <img className="operum-mark" src="/operum.png" alt="" aria-hidden="true" />
           </div>
-          <span>harborline</span>
+          <span>Operum</span>
           <button
             className="icon-button mobile-close"
             onClick={() => setMobileNav(false)}
