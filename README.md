@@ -1,15 +1,71 @@
-# dareDEVils-AverisXMonash-Hackathon
-Team dareDEVils Repo for Averis X Monash Hackathon
+<div align="center">
 
-# Operum
+# 🚢 Operum
 
-**Confidence-Aware Discrepancy Detection for Shipping Instructions and Bills of Lading**
+### **Confidence-Aware Discrepancy Detection for Shipping Documents**
 
-*Classify inbound shipping emails, compare SI against draft BL, and escalate only what actually needs a human.*
+<p>
+  <strong>Classify emails.</strong> ·
+  <strong>Compare documents.</strong> ·
+  <strong>Detect real discrepancies.</strong> ·
+  <strong>Escalate uncertainty.</strong>
+</p>
 
-[Repo](https://github.com/SGTK06/dareDEVils-AverisXMonash-Hackathon) · [Live Client](https://daredevils-averisxmonash-hackathon.onrender.com/) · [How It Works](#how-it-works) · [Quick Start](#quick-start)
+<br>
 
-`python` `fastapi` `react` `random-forest` `sentence-transformers` `levenshtein` `gemini` `human-in-the-loop` `supabase` `document-comparison` `email-classification`
+<a href="https://github.com/SGTK06/dareDEVils-AverisXMonash-Hackathon">
+  <img src="https://img.shields.io/badge/GitHub-Repository-18181B?style=for-the-badge&logo=github&logoColor=white" />
+</a>
+<a href="https://daredevils-averisxmonash-hackathon.onrender.com/">
+  <img src="https://img.shields.io/badge/Live-Demo-06B6D4?style=for-the-badge&logo=googlechrome&logoColor=white" />
+</a>
+
+<br><br>
+
+<img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" />
+<img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" />
+<img src="https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black" />
+<img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+<img src="https://img.shields.io/badge/Random%20Forest-8B5CF6?style=flat-square" />
+<img src="https://img.shields.io/badge/Gemini-4285F4?style=flat-square&logo=google&logoColor=white" />
+<img src="https://img.shields.io/badge/Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white" />
+
+<br><br>
+
+**Averis × Monash Hackathon**
+
+**Built by Team dareDEVils**
+
+</div>
+
+---
+
+<div align="center">
+
+### 🧠 From Inbox → Intelligence → Action
+
+</div>
+
+```text
+📧 Incoming Email
+       │
+       ▼
+🧠 Intent Classification
+       │
+       ▼
+📄 SI + Draft BL Extraction
+       │
+       ▼
+🔍 Deterministic Comparison
+       │
+       ▼
+🤖 Gemini Verification
+       │
+       ▼
+┌──────────────┬──────────────┬──────────────────┐
+│      OK      │   MISMATCH   │  NEEDS_REVIEW    │
+└──────────────┴──────────────┴──────────────────┘
+```
 
 ---
 
@@ -148,11 +204,11 @@ Every field comparison resolves to a verdict backed by an explicit reason (evide
 └───────────────────────────────────────────────────────────────────┘
 ```
 
-**Client/server split:** the React client (`/client`) is the operator-facing review workspace; the FastAPI server (`/server`) exposes classification and comparison as API endpoints (`server/app.py`) and coordinates the pipeline (`comparison_service.py`, `classification/`, `comparison/`).
-
-**Note:** `server/ingest/llama_parse.py` (LlamaParse-based document parsing) and `server/llm/gemini.py`'s `extract_with_gemini` (LLM-based field extraction) exist as separate, available modules but are not currently wired into the live `compare_email` flow — extraction there is done via local document parsing + alias matching, and Gemini is only called to verify already-flagged mismatches.
-
-`server/comparison/legacy_compare.py` and `legacy_item_compare.py` are an older, standalone comparison implementation (includes cosine-similarity-based item/feature/unit comparison for a `description_of_goods` field). Only one function from `legacy_compare.py` — `find_attachment_pair_for_email` (locates the SI/BL attachment files for an email) — is actually imported and used by the live `comparison_service.py`. The rest of that module, and all of `legacy_item_compare.py`, is unused by the live app and only runnable as a standalone CLI script.
+> **Client/server split:** the React client (`/client`) is the operator-facing review workspace; the FastAPI server (`/server`) exposes classification and comparison as API endpoints (`server/app.py`) and coordinates the pipeline (`comparison_service.py`, `classification/`, `comparison/`).
+>
+> **Note:** `server/ingest/llama_parse.py` (LlamaParse-based document parsing) and `server/llm/gemini.py`'s `extract_with_gemini` (LLM-based field extraction) exist as separate, available modules but are not currently wired into the live `compare_email` flow — extraction there is done via local document parsing + alias matching, and Gemini is only called to verify already-flagged mismatches.
+>
+> `server/comparison/legacy_compare.py` and `legacy_item_compare.py` are an older, standalone comparison implementation (includes cosine-similarity-based item/feature/unit comparison for a `description_of_goods` field). Only one function from `legacy_compare.py` — `find_attachment_pair_for_email` (locates the SI/BL attachment files for an email) — is actually imported and used by the live `comparison_service.py`. The rest of that module, and all of `legacy_item_compare.py`, is unused by the live app and only runnable as a standalone CLI script.
 
 ---
 
@@ -488,4 +544,8 @@ dareDEVils-AverisXMonash-Hackathon/
 
 ---
 
+<div align="center">
+
 Built by **Team dareDEVils** · Averis X Monash Hackathon · [Live Client](https://daredevils-averisxmonash-hackathon.onrender.com/)
+
+</div>
