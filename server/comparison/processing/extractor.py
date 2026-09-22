@@ -1,9 +1,15 @@
 import re
 from collections import Counter
-
 from ..processing_steps.normalization import normalize_label
+from ..processing_steps.semantic_matching import semantic_field_match
 
 FIELD_ORDER = ["shipper", "consignee", "notify_party", "port_of_loading", "port_of_discharge", "container_count", "gross_weight_kg"]
+FIELD_PROTOTYPES_FALLBACK = {
+    "shipper": "shipper exporter seller", "consignee": "consignee order receiver",
+    "notify_party": "notify party intermediate consignee", "port_of_loading": "port loading origin",
+    "port_of_discharge": "port discharge destination", "container_count": "container count number packages",
+    "gross_weight_kg": "gross weight kilograms",
+}
 ALIASES = {
     "shipper": {"SHIPPER", "SHIPPER EXPORTER", "SHIPPER PRINCIPAL OR SELLER", "EXPORTER"},
     "consignee": {"CONSIGNEE", "CONSIGNEE NON NEGOTIABLE", "TO THE ORDER OF", "TO THE ORDER OF SHIPPER"},
@@ -14,37 +20,6 @@ ALIASES = {
     "gross_weight_kg": {"GROSS WEIGHT", "GROSS WEIGHT KG", "GROSS WEIGHT KGS", "GROSS WEIGHT KGS KGS", "GROSS WEIGHT (KG)", "GROSS WT KG", "GROSS WT KGS", "GROSS WT (KGS)", "GROSS WT (KG)"},
 }
 ALIASES = {field: {normalize_label(alias) for alias in labels} for field, labels in ALIASES.items()}
-FIELD_PROTOTYPES = {
-    "shipper": "shipper exporter seller",
-    "consignee": "consignee order receiver",
-    "notify_party": "notify party intermediate consignee",
-    "port_of_loading": "port loading origin",
-    "port_of_discharge": "port discharge destination",
-    "container_count": "container count number packages",
-    "gross_weight_kg": "gross weight kilograms",
-}
-LABEL_EXPANSIONS = {
-    "WT": "WEIGHT", "WGT": "WEIGHT", "KGS": "KILOGRAMS", "KG": "KILOGRAMS",
-    "NO": "NUMBER", "NOS": "NUMBERS", "CONT": "CONTAINER", "CNTR": "CONTAINER",
-    "DISCH": "DISCHARGE", "LOAD": "LOADING", "POL": "PORT LOADING", "POD": "PORT DISCHARGE",
-    "SHPR": "SHIPPER", "EXP": "EXPORTER",
-}
-
-
-def _semantic_field_fallback(label: str) -> str | None:
-    expanded = " ".join(LABEL_EXPANSIONS.get(token, token) for token in normalize_label(label).split()).lower()
-    left = Counter(expanded.split())
-    scores = []
-    for field, prototype in FIELD_PROTOTYPES.items():
-        right = Counter(prototype.split())
-        keys = set(left) | set(right)
-        denominator = (sum(v * v for v in left.values()) * sum(v * v for v in right.values())) ** .5
-        score = sum(left[key] * right[key] for key in keys) / denominator if denominator else 0.0
-        scores.append((score, field))
-    score, field = max(scores)
-    return field if score >= 0.42 else None
-
-
 def field_for_label(label: str) -> str | None:
     normalized = normalize_label(label)
     exact = next((field for field, labels in ALIASES.items() if normalized in labels), None)
@@ -56,9 +31,28 @@ def field_for_label(label: str) -> str | None:
     for field, labels in ALIASES.items():
         if any(normalized.startswith(alias + " ") for alias in labels):
             return field
-    # Notebook-compatible fallback for unfamiliar labels. Exact aliases above
-    # always win, preventing semantic ambiguity from changing known fields.
-    return _semantic_field_fallback(normalized)
+    # Notebook-compatible embedding + clustering fallback for unfamiliar
+    # labels. Exact aliases above always win, preserving existing accuracy.
+    # Semantic embeddings are deliberately high precision.  At this threshold
+    # they can only override the legacy fallback when the label is extremely
+    # close to a canonical field; uncertain labels retain the old behavior.
+    semantic_field, semantic_score = semantic_field_match(normalized, .80)
+    if semantic_field:
+        return semantic_field
+
+    # Keep the previous offline behavior when the local embedding model is
+    # unavailable or cannot initialize. This is also conservative: token
+    # overlap is accepted only at the same threshold used by the old path.
+    expanded = normalized.lower()
+    left = Counter(expanded.split())
+    candidates = []
+    for field, prototype in FIELD_PROTOTYPES_FALLBACK.items():
+        right = Counter(prototype.split())
+        denominator = (sum(v * v for v in left.values()) * sum(v * v for v in right.values())) ** .5
+        score = sum(left[key] * right[key] for key in set(left) | set(right)) / denominator if denominator else 0.0
+        candidates.append((score, field))
+    score, field = max(candidates)
+    return field if score >= .42 else None
 
 
 def extract_fields(text: str | None) -> dict[str, str]:
