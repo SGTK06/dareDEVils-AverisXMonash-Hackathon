@@ -18,7 +18,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  MoreHorizontal,
   PanelRight,
   RefreshCw,
   Search,
@@ -75,8 +74,12 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
     loadPreferences(userId).then(prefs => {
       setDark(prefs.theme === "dark");
       setView((prefs.last_view as View) || "inbox");
-      if (prefs.filters && typeof prefs.filters.status === "string") {
-         setFilter(prefs.filters.status as any);
+      const savedStatus = prefs.filters?.status;
+      if (
+        typeof savedStatus === "string" &&
+        ["All", "Mismatch", "Match", "Needs review", "Failed", "Classified"].includes(savedStatus)
+      ) {
+        setFilter(savedStatus as EmailStatus | "All");
       }
       setPrefsLoaded(true);
     });
@@ -85,7 +88,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("theme", dark ? "dark" : "light");
-    
+
     if (prefsLoaded) {
       savePreferencesDebounced(userId, {
         theme: dark ? "dark" : "light",
@@ -368,6 +371,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
               setFilter={setFilter}
               onOpen={openEmail}
               onRetry={(id) => notify(`Retry queued for ${id}`)}
+              onNotify={notify}
             />
             {selected && (
               <div className="detail-overlay">
@@ -381,7 +385,7 @@ function Dashboard({ userEmail, userId, onSignOut }: DashboardProps) {
           </>
         )}
         {!loading && !loadError && view === "review" && (
-          <ReviewView emails={emails} onOpen={openEmail} onNotify={notify} onRefresh={() => {
+          <ReviewView emails={emails} onOpen={openEmail} onRefresh={() => {
             api.listEmails().then(setEmails);
             notify("Review queue refreshed");
           }} />
@@ -449,7 +453,8 @@ function InboxView({
   filter,
   setFilter,
   onOpen,
-  onRetry
+  onRetry,
+  onNotify
 }: {
   emails: EmailRecord[];
   allEmails: EmailRecord[];
@@ -459,6 +464,7 @@ function InboxView({
   setFilter: (value: EmailStatus | "All") => void;
   onOpen: (email: EmailRecord) => void;
   onRetry: (id: string) => void;
+  onNotify: (message: string) => void;
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 50; // Set to 50 emails per page
@@ -563,7 +569,7 @@ function InboxView({
             <option>Failed</option>
             <option>Classified</option>
           </select>
-          <button className="button button-quiet" onClick={() => notify("Advanced filtering coming soon!")}>
+          <button className="button button-quiet" onClick={() => onNotify("Advanced filtering coming soon!")}>
             <Filter size={14} /> More filters
           </button>
         </div>
@@ -1003,14 +1009,7 @@ function DetailView({
                 onClick={async () => {
                   if (email.category === "Comparison request") {
                     await api.correctComparison(email.id, edited);
-                    const updatedEmail = await api.getEmail(email.id);
                     onNotify("Comparison field override saved and verified");
-                    // Assuming onBack or an onReload prop exists to refresh the UI, 
-                    // but we can just let React handle it if we trigger a parent reload.
-                    // Instead of a full reload, we can trigger re-fetch by doing:
-                    // Actually, Dashboard relies on polling or manual re-render, 
-                    // but since api.ts mutates cache, we might need a way to refresh it.
-                    // The easiest way is to close the detail view.
                     onBack();
                   } else {
                     await api.correct(email.id, edited);
@@ -1137,11 +1136,10 @@ function EvidenceDrawer({
 function ReviewView({
   emails,
   onOpen,
-  onNotify
+  onRefresh
 }: {
   emails: EmailRecord[];
   onOpen: (email: EmailRecord) => void;
-  onNotify: (message: string) => void;
   onRefresh: () => void;
 }) {
   const reviewEmails = emails.filter(
@@ -1517,8 +1515,12 @@ function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (messa
   useEffect(() => {
     api.getRuns("submission", 1).then(runs => {
       if (runs && runs.length > 0 && runs[0].results) {
-        const res = runs[0].results as any;
-        setScore(res.final_score !== undefined ? res : null);
+        const res = runs[0].results as Partial<EndToEndScore> | null;
+        if (res && typeof res.final_score === "number") {
+          setScore(res as EndToEndScore);
+        } else {
+          setScore(null);
+        }
       }
     }).catch(() => {});
   }, []);
@@ -1543,19 +1545,28 @@ function EndToEndTestView({ onNotify, onBack, onComparison }: { onNotify: (messa
   </section>;
 }
 
+type RunRecord = {
+  id: string;
+  run_type: string;
+  status: string;
+  email_count: number | null;
+  score: number | null;
+  started_at: string;
+};
+
 function RunsView({
   onNotify
 }: {
   onNotify: (message: string) => void;
 }) {
-  const [runs, setRuns] = useState<any[]>([]);
+  const [runs, setRuns] = useState<RunRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.getRuns().then(data => {
       setRuns(data);
       setLoading(false);
-    }).catch(err => {
+    }).catch(() => {
       onNotify("Failed to fetch runs");
       setLoading(false);
     });
@@ -1584,7 +1595,7 @@ function RunsView({
           <RefreshCw size={15} /> Refresh
         </button>
       </div>
-      
+
       <div className="run-table">
         <div className="run-head" style={{ gridTemplateColumns: "1.5fr 1.5fr 1fr 1fr 1fr" }}>
           <span>Run Type</span>
