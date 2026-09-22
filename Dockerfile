@@ -22,7 +22,8 @@ COPY server/scoring.py ./scoring.py
 COPY server/app.py ./app.py
 COPY server/score_cli.py ./score_cli.py
 COPY server/persistence.py ./persistence.py
-
+COPY server/comparison_service.py ./comparison_service.py
+COPY server/comparison ./comparison
 COPY server/classification ./classification
 
 # ------------------------------------------------------------

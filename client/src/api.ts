@@ -334,7 +334,9 @@ export const api = {
     const byId = new Map(classifications.results.map((item) => [item.email_id, item]));
     
     const comparisonIds = classifications.results.filter(c => c.category === "BL_COMPARISON").map(c => c.email_id).join(",");
-    const comparisons = comparisonIds ? await request<Record<string, { status: string; reason: string; result_text: string }>>(`/comparisons/batch?ids=${comparisonIds}`).catch(() => ({})) : {};
+    const comparisons: Record<string, { status: string; reason: string; result_text: string }> = comparisonIds
+      ? await request<Record<string, { status: string; reason: string; result_text: string }>>(`/comparisons/batch?ids=${comparisonIds}`).catch(() => ({}))
+      : {};
 
     records.forEach((record) => {
       const classification = byId.get(record.id);

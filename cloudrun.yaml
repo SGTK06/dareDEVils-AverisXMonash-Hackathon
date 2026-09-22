@@ -1,0 +1,40 @@
+﻿apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: daredevils
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 160
+      serviceAccountName: 298109189815-compute@developer.gserviceaccount.com
+      timeoutSeconds: 300
+      containers:
+        - image: asia-southeast1-docker.pkg.dev/averisxmonash-hackathon/averisx-repo/daredevils:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: groundtruth
+              mountPath: /secrets
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            failureThreshold: 1
+            periodSeconds: 240
+            timeoutSeconds: 240
+      volumes:
+        - name: groundtruth
+          csi:
+            driver: gcsfuse.run.googleapis.com
+            readOnly: true
+            volumeAttributes:
+              bucketName: averisx-ground-truth
+  traffic:
+    - percent: 100
+      latestRevision: true
